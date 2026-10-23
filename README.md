@@ -128,8 +128,15 @@ this repository.**
 | `SALON_NOTIFY_EMAIL` | Where the studio gets a copy of each booking request. |
 | `MAIL_DEV_OUTBOX=file` | Development only: writes reset mails to `data/outbox/*.eml` so the flow can be tested with no mail server. Forced off when `SMTP_HOST` is set. |
 | `BOOTSTRAP_ADMIN_EMAIL/NAME/PASSWORD` | Non-interactive first admin (`npm run create-admin -- --non-interactive`), handy for a deploy pipeline. Do not reuse a real password. |
-| `SALON_*` | Name, tagline, phone, address, `SALON_SINCE`, `SALON_MAPS_URL` — the business details shown across the site. |
+| `SALON_*` | Name, tagline, phone, address, `SALON_SINCE`, `SALON_MAPS_URL`, `SALON_NOTIFY_EMAIL` — the business details shown across the site. |
 | `SALON_TIMEZONE` | The IANA zone the diary is written on (default `Asia/Kolkata`). A zone saved at `/portal/settings` wins over this, because the studio should not need a terminal to change its clock. |
+
+Every `SALON_*` value above is a **starting point**: the same details are
+editable at `/portal/details`, and a value saved there wins over the environment
+until the box is emptied again. `SESSION_SECRET`, the SMTP credentials,
+`TURNSTILE_SECRET_KEY`, `PUBLIC_APP_URL` and `DATABASE_FILE` are **not** on that
+page and stay in the environment — see
+[What the portal holds vs what stays in `.env`](#what-the-portal-holds-vs-what-stays-in-env).
 
 ---
 
@@ -165,7 +172,7 @@ itself in the UI and in `GET /healthz`:
 | `npm run db:setup` | Migrate, then seed. |
 | `npm run create-admin` | Interactive: create the first staff account, or promote an existing email to `admin`. |
 | `npm run slots:generate` | Materialises slot rows for the whole booking horizon (also happens lazily when a day is viewed). |
-| `npm run check` | 14 assertions against a transaction that is always rolled back — see [Verification](#verification). |
+| `npm run check` | 48 assertions — booking integrity and the portal guard inside a transaction that is always rolled back, then staff-account and site-detail checks on throwaway rows it deletes — see [Verification](#verification). |
 
 ---
 
@@ -191,7 +198,7 @@ src/
     auth.js               register, login, logout, forgot-password, reset
     account.js            profile, password change, booking list + cancel
     booking.js            browse → pick day → pick slot → submit → done
-    portal.js             /portal: dashboard, bookings, customers, day sheet, services, settings
+    portal.js             /portal: dashboard, bookings, customers, day sheet, services, settings, details, staff
     admin.js              /admin → 302 to the matching /portal page
 views/                    partials, auth/, pages/, portal/, errors/
 public/                   styles.css, portal.css, main.js, portal.js, favicon.svg, assets/
@@ -283,16 +290,20 @@ design are untouched and share only the database.
 | `/portal/day/DATE` | The day sheet, hour by hour: who holds each time, block a free time with a reason, reopen a blocked one |
 | `/portal/services` | Chair time, price text, description, bookable flag and per-group visibility |
 | `/portal/settings` | The salon's operating time zone, weekly opening hours, the four booking rules, and what is wired up vs not |
+| `/portal/details` | The business details that ship as `SALON_*` in `.env` — name, tagline, phone, address, year, Maps link, notification email |
+| `/portal/staff` | Who can open this portal: make a staff login, promote an existing account, reset a password, switch one off |
 
 **Access is enforced on the server, on every request.** `src/routes/portal.js`
 mounts `requireAdmin` for the whole tree; it re-reads the account from the
 database by session id, and requires `role = 'admin'` **and** `is_active` before
-any handler runs. There is no portal link to hide: an anonymous visitor and a
-signed-in customer both get a 403 that renders no booking data, and the JSON
-variant says only `Salon staff access only.` Deleting the cookie, editing the
-page or replaying a POST changes nothing — the role check happens again
-server-side, and every mutating form still needs the session's CSRF token. The
-old `/admin/*` URLs 302 to their `/portal` equivalents.
+any handler runs. The header does offer a **Staff** link to signed-out visitors
+(`/auth/login?next=/portal`) as a convenience for the person standing at the
+counter — it is not a control, and knowing the URL was never one: an anonymous
+visitor and a signed-in customer both get a 403 that renders no booking data,
+and the JSON variant says only `Salon staff access only.` Deleting the cookie,
+editing the page or replaying a POST changes nothing — the role check happens
+again server-side, and every mutating form still needs the session's CSRF token.
+The old `/admin/*` URLs 302 to their `/portal` equivalents.
 
 **What the portal never shows:** a password hash, a reset token, a session row,
 or any credential. `records.customerForStaff()` selects account columns by name
@@ -326,7 +337,8 @@ the runtime has no real name for the offset.
 
 ### Making a staff account
 
-Portal logins are created on the terminal, never through the website:
+The **first** staff login has to come from the terminal — before anyone can sign
+in, there is nobody on the inside who could hand out access:
 
 ```bash
 npm run create-admin
@@ -334,8 +346,40 @@ npm run create-admin
 
 It asks for an email, a display name and a password (or reads
 `BOOTSTRAP_ADMIN_EMAIL/_NAME/_PASSWORD` from `.env`), stores only a bcrypt hash,
-and promotes an existing account rather than overwriting its password. There is
-no signup path to `role = 'admin'`.
+and promotes an existing account rather than overwriting its password.
+
+**Every staff login after that is made at `/portal/staff`** by someone who is
+already signed in as staff. Typing an email that already has a customer account
+promotes it and leaves their password alone; filling in the password box as well
+sets that new password and signs the account's other devices out. A login can be
+switched off or turned back into a customer account from the same page. Rails:
+you cannot deactivate or demote the login you are using, and a second guard
+refuses to remove the last working staff login.
+
+There is still **no signup path to `role = 'admin'`**: `/auth/register` always
+creates a customer, the portal routes sit behind `requireAdmin`, and every
+mutating form needs the session's CSRF token.
+
+### What the portal holds vs what stays in `.env`
+
+`/portal/details` edits the studio's own words — name, tagline, phone, address,
+year serving, Maps link, and the address each booking is copied to. The
+precedence is the same one the studio clock already uses:
+
+1. the `salon_*` row in `settings`, typed at `/portal/details`;
+2. else `SALON_*` from the environment;
+3. else the shipped default in `src/config.js`.
+
+Saving applies immediately — `config.salon` is updated in the running process, so
+the header, the page titles, the `tel:` link and the outgoing mails change without
+a restart. An empty box clears the stored row and hands that one value back to
+`.env`. A 10-digit phone is rebuilt as `+91…` for the call button.
+
+The rest of `.env` deliberately **is not** on that page: `SESSION_SECRET`,
+`SMTP_*`, `TURNSTILE_SECRET_KEY`, `PUBLIC_APP_URL` and the database file. Those
+are credentials and deployment facts. Putting them in a browser-editable form
+would mean sending the cookie-signing key and the mailbox password over the site
+they protect, and the page says so instead of pretending otherwise.
 
 ---
 
@@ -357,6 +401,12 @@ editable in the [staff portal](#staff-portal-portal) (staff login required):
   against its allowed range before it is written.
 - **`/portal/settings` → Time zone** — the salon's operating clock, applied to
   the diary and the website at once.
+- **`/portal/details`** — the studio's own words: name, tagline, phone, address,
+  year serving, Maps link, and who gets a copy of each booking. Each field is
+  checked before it is written (length, phone digits, an `http(s)://` Maps link,
+  a believable year); the fields that pass still save when one is refused.
+- **`/portal/staff`** — who can open the portal. See
+  [Making a staff account](#making-a-staff-account).
 - **`/portal/day/DATE`** — the day sheet: block a single time (with a reason) or
   reopen it. Blocked times disappear from availability immediately, and a time
   held by a booking cannot be blocked out from under the client.
@@ -600,7 +650,18 @@ PASS  reset tokens are stored as sha-256 digests
 PASS  changing a password signs every other device out
 PASS  …and drops the account's outstanding reset links
 PASS  the new password is the one that verifies
-31/31 checks passed.
+PASS  promoting an existing account keeps their own name — Kept Name · admin
+PASS  …and the password they already chose still signs them in
+PASS  the portal can make a staff login
+PASS  the staff list never carries a password hash
+PASS  taking the staff role closes their open portal session
+PASS  switching a login off stops it signing in at all
+PASS  the saved name wins over the environment value — Naina Beauty Parlour → Check Parlour
+PASS  …and is pushed into the running config, so the header and the mails change without a restart
+PASS  a phone typed by staff rebuilds the tel: link — +919439712995
+PASS  …and the studio clock row is not swept in with them — salon_name, salon_phone
+PASS  an empty box hands the value back to .env — Naina Beauty Parlour
+48/48 checks passed.
 ```
 
 The portal was then driven over **real HTTP** against the running server — every
@@ -609,11 +670,16 @@ the guard fires before a handler, that a 403 carries no booking data, that a
 stale or missing CSRF token is refused with 400 while the session's live token
 is accepted, that a search/filter/paging query string cannot reach SQL, that
 blocking a time removes it from `/api/availability` and that reopening it
-returns, that an out-of-range booking rule is refused rather than stored, and
-that saving a time zone re-labels the diary without moving an appointment. All
-68 of those assertions passed, and the rows the run touched (statuses, staff
-notes, opening hours, settings, throwaway logins) were restored afterwards — the
-database this README was written against is the one it started from.
+returns, that an out-of-range booking rule is refused rather than stored, that
+saving a time zone re-labels the diary without moving an appointment, that
+`/portal/details` refuses an implausible year / a non-`https` Maps link / a
+phone with no digits while still saving the fields that passed, that a login
+made at `/portal/staff` opens the portal on its first try, and that a demoted or
+switched-off staff account loses its open portal session on the very next
+request. All 110 of those assertions passed, and the rows the run touched
+(statuses, staff notes, opening hours, `salon_*` settings, throwaway logins) were
+restored afterwards — the database this README was written against is the one it
+started from.
 
 Beyond the script, the whole flow was re-run against a **wiped database** using
 only the documented commands (`npm run db:setup`, `npm run create-admin`,
