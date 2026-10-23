@@ -22,6 +22,7 @@ simulated.
 - [Project layout](#project-layout)
 - [Database schema and migrations](#database-schema-and-migrations)
 - [How availability and double-booking prevention work](#how-availability-and-double-booking-prevention-work)
+- [Customer profile completion and the booking gate](#customer-profile-completion-and-the-booking-gate)
 - [Staff portal (`/portal`)](#staff-portal-portal)
 - [Editing the catalogue, hours and booking rules](#editing-the-catalogue-hours-and-booking-rules)
 - [Security notes](#security-notes)
@@ -172,7 +173,7 @@ itself in the UI and in `GET /healthz`:
 | `npm run db:setup` | Migrate, then seed. |
 | `npm run create-admin` | Interactive: create the first staff account, or promote an existing email to `admin`. |
 | `npm run slots:generate` | Materialises slot rows for the whole booking horizon (also happens lazily when a day is viewed). |
-| `npm run check` | 48 assertions — booking integrity and the portal guard inside a transaction that is always rolled back, then staff-account and site-detail checks on throwaway rows it deletes — see [Verification](#verification). |
+| `npm run check` | 73 assertions — booking integrity, the portal guard and the profile/booking gate inside a transaction that is always rolled back, then staff-account and site-detail checks on throwaway rows it deletes — see [Verification](#verification). |
 
 ---
 
@@ -187,10 +188,14 @@ src/
     index.js              node:sqlite handle, WAL, helpers (get/all/run/tx)
     migrate.js            ledger-backed migration runner (schema_migrations)
     migrations/001_init.sql
+    migrations/002_staff_portal.sql
+    migrations/003_profile_completion.sql
     seed.js               settings, hours, catalogue
   lib/
     users.js password.js captcha.js csrf.js session-store.js
     mailer.js validate.js dates.js settings.js slots.js catalogue.js
+    profile.js              the seven Blocks, and the maths behind the completion bar
+    uploads.js              customer avatars: decode, signature-check, size-cap, name
     records.js              staff queries: dashboard snapshot, booking search, roster, day rows
     guards.js flash.js auth-rate-limit.js async.js
   routes/
@@ -202,6 +207,7 @@ src/
     admin.js              /admin → 302 to the matching /portal page
 views/                    partials, auth/, pages/, portal/, errors/
 public/                   styles.css, portal.css, main.js, portal.js, favicon.svg, assets/
+public/uploads/avatars/   customer photos, created on first upload (gitignored)
 scripts/                  migrate, seed, create-admin, generate-slots, check
 data/                     SQLite database + dev outbox (gitignored)
 ```
@@ -216,7 +222,7 @@ Migrations are plain numbered SQL files applied once each, tracked in
 
 | Table | Holds |
 | --- | --- |
-| `users` | name, unique email, bcrypt hash, role (`customer`/`admin`), phone, `preferred_title`, notes, active flag |
+| `users` | name, unique email, bcrypt hash, role (`customer`/`admin`), phone, `preferred_title`, notes, active flag — plus the four booking details from migration `003`: `age`, `address`, `block`, `photo_path` |
 | `sessions` | express-session rows: `sid`, JSON `sess`, `expires_at` |
 | `opening_hours` | one row per weekday: open/closed, `opens_at`, `closes_at`, staff note |
 | `settings` | key/value booking rules |
@@ -270,6 +276,69 @@ the hard limits are refused with a message, never stored):
 
 Requests arrive as **pending** — the slot is held, but the client is told plainly
 that the studio still has to accept it. Only staff can confirm.
+
+---
+
+## Customer profile completion and the booking gate
+
+Signing in is not enough to request a chair time. The studio needs to know who is
+coming, how to reach them, and which Block they travel from, so
+`/account/profile` collects five details and a server-side gate holds booking back
+until all five are there.
+
+| Step | Worth | Satisfied by |
+| --- | --- | --- |
+| Name | 20% | `name` |
+| Phone number | 40% | `phone` — at least 6 digits |
+| Age | 60% | `age` — whole number, 1–120 |
+| Profile photo | 80% | `photo_path` |
+| Address **and** Block | 100% | `address` + `block` (one step — an address with no Block chosen is still incomplete) |
+
+`src/lib/profile.js` owns that maths, the seven-value Block allowlist and the
+field validators, so the bar, the flash message and the gate can never disagree
+with each other. The list is the Blocks of Bhadrak district, spelled as the
+dropdown shows them: Bhadrak, Basudevpur, Bhandaripokhari, Bonth, Chandabali,
+Dhamnagar, Tihidi. Migration `003` puts the same list in a `CHECK` constraint, so
+a value typed past the form is refused by SQLite as well as by the route.
+
+**Where the rule lives.** `src/routes/booking.js` opens with
+`router.use(requireUser, requireProfile)`, which runs before every booking page,
+the slot JSON at `/book/slots`, and the booking `POST` itself. `requireProfile`
+re-reads the account from the database on each request, so completeness is decided
+server-side; removing a detail closes the gate again immediately. Browser-side it
+is only ever a courtesy. HTML requests get a flash naming what is missing and a
+redirect to `/account/profile`; JSON requests get `403` with
+`profileIncomplete: true` rather than a redirect a script would silently follow.
+Staff logins are exempt — the counter books on behalf of walk-ins.
+
+**Keeping the intent.** `requireUser` stores the requested URL in
+`session.returnTo`, and the auth pages carry it as `?next=` across the
+sign-in / register / forgot-password tabs. After a complete profile is saved the
+customer lands back on the booking page they first wanted; an incomplete one keeps
+them on `/account/profile` and remembers the destination for next time. A fresh
+registration goes to the profile page first, since it starts at 40%.
+
+**Partial saves are allowed.** `POST /account/profile` only validates the *shape*
+of what is sent, so a customer can add one detail at a time and see the bar move.
+`users.updateProfile()` keeps any stored value whose key is absent from the form,
+which is why the same route can write a photo and a name in one go without
+blanking the rest.
+
+**Photos.** There is no multipart parser in the dependencies, so
+`public/main.js` draws the pick into a 256 px square canvas and posts a base64
+data URL. Nothing about that is trusted: `src/lib/uploads.js` re-decodes it, checks
+the first bytes against the JPEG/PNG/WebP signatures (an SVG renamed to `.png`
+fails), caps it at 400 KB, and writes it under a generated name —
+`public/uploads/avatars/<user id>-<12 hex>.<ext>`. The row stores only the URL
+path. Replacing or removing a photo deletes the old file, but only through
+`safeRelativePath()`, which accepts a single bare filename under `/uploads/avatars/`
+and refuses everything else, so no path from a form can delete an asset the studio
+supplied. `/public/uploads/` is gitignored: these are real faces tied to real
+accounts.
+
+**The tick.** At 100% the bar disappears and a small blue circular tick sits by the
+photo. It means *the studio has everything it needs to hold a time* — the page says
+so in as many words, and it is not presented as an identity or government check.
 
 ---
 
@@ -446,7 +515,10 @@ the slot).
   out, and a bounded throttle on reset requests.
 - **Input handling** — every field validated and length-capped on the server;
   EJS escapes by default; SQLite statements are always parameterised (no string
-  interpolation into SQL); body size capped at 100 kB.
+  interpolation into SQL); body size capped at 100 kB, with a route-scoped 800 kB
+  limit on `/account/profile` alone so a re-sized avatar can be posted — the
+  uploaded bytes are still capped at 400 kB, signature-checked, and renamed by
+  the server.
 - **Headers** — CSP with `default-src 'self'`, no `'unsafe-inline'` for scripts
   **or styles** (the stylesheet therefore has utility classes instead of
   `style="…"` attributes), `object-src 'none'`, `base-uri 'self'`,
@@ -461,6 +533,12 @@ the slot).
   render. Emails are never enumerated: a
   sign-in failure gives one generic message, and forgot-password behaves the same
   whether or not the address exists (when mail is configured).
+- **Profile details** — age, address, Block and photo are held in the `users` row
+  and the avatars directory, shown to that customer and to staff; no public page,
+  search result or `/api/*` route reads them, and the account page is behind
+  `requireUser`. `/public/uploads/` is gitignored because those files are real
+  faces tied to real accounts, and `safeRelativePath()` means a form can only
+  ever point at a filename this server wrote in that directory.
 - **Errors** — 5xx responses carry a generic sentence; the stack trace goes to
   the server log only.
 
@@ -482,6 +560,17 @@ the slot).
   slot tiles; a skip-to-content link is the first tab stop on every page.
 - One `role="status"` live region on the booking page announces slot loading and
   failures; the decorative spinner is `aria-hidden` so it never competes.
+- The completion bar is a real `role="progressbar"` with `aria-valuenow`, and the
+  percentage next to it sits in an `aria-live="polite"` region, so saving one
+  detail is announced without moving the caret. It is five fixed segments rather
+  than a percentage-width fill because the CSP allows no inline styles; each
+  segment carries the step's own label, so progress is readable without colour.
+- Password fields share one partial with a `Show`/`Hide` button whose accessible
+  name always ends in "password" (`<span class="sr-only">`), and every error is
+  joined to its input with `aria-describedby` + `aria-invalid`.
+- Below 700 px the hero stacks and centres: the portrait sits mid-page with the
+  two pill CTAs — Book an appointment and See services — beneath it, and the
+  header's account controls collapse into the compact menu.
 - `prefers-reduced-motion: reduce` disables transitions, the spinner and hover
   movement; `scroll-behavior` reverts to auto.
 - One `<h1>` per page, no skipped heading levels, landmarks (`header`/`main`/
@@ -584,10 +673,20 @@ attaches the pointer listener.
 A sticky header that stacks the brand, the menu button and two buttons over
 three rows consumed about a third of a phone viewport, so under 960px it
 collapses to a single 60px row: the account links move into the menu panel, the
-wordmark drops "Parlour" (and "Beauty" below 380px), and the booking button reads
-just "Book". CSS shows exactly one of each pair at every width, so the
+wordmark drops "Parlour" (and "Beauty" below 380px), and the sign-in pill shrinks
+to its label alone. CSS shows exactly one of each pair at every width, so the
 accessibility tree never doubles up — `views/partials/head.ejs` carries both and
 `.header-cta__auth` / `.nav__auth` decide which is live.
+
+The header holds no booking button: requesting a time belongs to the hero, the
+nav and the service pages, and a second copy at the top pushed the account
+controls around on small screens. What sits there instead is a round
+**account icon** beside the pill **Sign in**. Before login both open the
+authentication page (the icon is the same destination, not a hidden second
+route); after login the icon becomes the only control and points at
+`/account`, showing the customer's own photo when the profile has one, so the
+signed-in state is visible without reading a name. Staff keep **Staff area** in
+the same row — it was never renamed and it never moves.
 
 ---
 
@@ -644,6 +743,31 @@ PASS  staff search matches the test requests — 2 hit(s)
 PASS  a hostile filter falls back instead of reaching SQL — newest / all / page 1
 PASS  customer reads never carry a password hash
 PASS  a roster filter outside the allowlist is ignored
+PASS  the Block list is the seven around Bhadrak, spelled as the dropdown shows them — 7 entries
+PASS  the bar reads 20 / 40 / 60 / 80 / 80 / 100 as the details land
+PASS  an address with no Block chosen does not close the profile
+PASS  …and neither does every detail except the name
+PASS  the missing list names what is still to add
+PASS  an age of 0 or 200 is never accepted by the maths
+PASS  a Block typed by hand is checked against the list
+PASS  the column accepts every Block the dropdown offers — 7/7
+PASS  …and the database itself refuses one outside the seven — constraint fired
+PASS  the same column guard covers the age — constraint fired
+PASS  a path outside the avatars folder is never treated as one of ours
+PASS  deleting a photo leaves any file it does not own alone
+PASS  real PNG bytes are accepted
+PASS  bytes that are not a picture are refused whatever mime they claim
+PASS  junk that is not base64 at all is refused
+PASS  an oversized payload is refused before anything is written
+PASS  an empty pick is a skip, not an error
+PASS  a signed-in customer with an incomplete profile cannot open the booking page — /account/profile
+PASS  …and the booking API answers 403 instead of a redirect a script can follow
+PASS  an anonymous request is sent to sign in first
+PASS  staff logins are exempt — they book at the counter
+PASS  a complete profile gets through the gate — 100%
+PASS  …and it closes again the moment one detail is taken back out
+PASS  a save that omits a detail leaves the stored value in place
+PASS  …but a Block the form never offered is dropped rather than written
 PASS  a salon wall time resolves to one real instant — 2026-10-26 10:30 → 2026-10-26T05:00:00Z
 PASS  an invented zone name is refused rather than guessed — GMT+05:30
 PASS  reset tokens are stored as sha-256 digests
@@ -661,7 +785,7 @@ PASS  …and is pushed into the running config, so the header and the mails chan
 PASS  a phone typed by staff rebuilds the tel: link — +919439712995
 PASS  …and the studio clock row is not swept in with them — salon_name, salon_phone
 PASS  an empty box hands the value back to .env — Naina Beauty Parlour
-48/48 checks passed.
+73/73 checks passed.
 ```
 
 The portal was then driven over **real HTTP** against the running server — every
@@ -680,6 +804,20 @@ request. All 110 of those assertions passed, and the rows the run touched
 (statuses, staff notes, opening hours, `salon_*` settings, throwaway logins) were
 restored afterwards — the database this README was written against is the one it
 started from.
+
+The sign-in and profile flow was driven the same way, over **real HTTP** against
+a running server — 35 assertions, all passing. A throwaway account registered
+with a name and a phone lands at 40%, is bounced off `/book` to
+`/account/profile`, and gets a 403 from the slot JSON; saving an age moves the
+rendered bar to 60% and names all seven Blocks in the dropdown; a Block outside
+the list, a non-numeric age, bytes that are not a picture and an SVG that calls
+itself a PNG are each refused with the offending field named and nothing
+written; the complete save lands on `/account`, the bar is gone, the blue tick is
+beside the photo and says it is not an identity check, the avatar is served back
+over HTTP, and booking opens. Deleting the photo closes the gate again on the
+same request. The header is checked in the same run: no booking button, an
+account icon, **Staff area** still present, and the three-way
+sign-in / register / forgot-password switch carrying `?next=`.
 
 Beyond the script, the whole flow was re-run against a **wiped database** using
 only the documented commands (`npm run db:setup`, `npm run create-admin`,

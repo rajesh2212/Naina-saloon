@@ -17,6 +17,8 @@ const dates = require('../src/lib/dates');
 const users = require('../src/lib/users');
 const records = require('../src/lib/records');
 const guards = require('../src/lib/guards');
+const profileLib = require('../src/lib/profile');
+const uploads = require('../src/lib/uploads');
 const { digestToken } = require('../src/lib/password');
 
 const results = [];
@@ -83,6 +85,30 @@ function guardReaches(userId) {
     () => { reached = true; },
   );
   return reached;
+}
+
+/**
+ * Runs the booking gate against a stub request for an already-loaded account.
+ * `reached` means the booking route would have executed, which is the whole
+ * claim that the rule is enforced server-side.
+ */
+function gateOutcome(user, accepts = 'html') {
+  let reached = false;
+  let redirect = null;
+  let payload = null;
+  const res = {
+    locals: { currentUser: user },
+    status() { return this; },
+    json(body) { payload = body; return this; },
+    redirect(to) { redirect = to; return this; },
+    render() { return this; },
+  };
+  guards.requireProfile(
+    { method: 'GET', originalUrl: '/book', session: {}, accepts: () => accepts },
+    res,
+    () => { reached = true; },
+  );
+  return { reached, redirect, payload };
 }
 
 try {
@@ -244,6 +270,127 @@ try {
       'a roster filter outside the allowlist is ignored',
       records.searchCustomers({ filter: "role='admin' OR 1=1" }).filter === 'all',
     );
+
+    // ------------------------------------- profile completion and the booking gate
+    console.log('\nProfile completion and the booking gate');
+
+    record(
+      'the Block list is the seven around Bhadrak, spelled as the dropdown shows them',
+      profileLib.BLOCKS.join('|') ===
+        'Bhadrak Block|Basudevpur Block|Bhandaripokhari Block|Bonth Block|Chandabali Block|Dhamnagar Block|Tihidi Block',
+      `${profileLib.BLOCKS.length} entries`,
+    );
+
+    const nothing = { name: '', phone: '', age: null, address: '', block: '', photo_path: null };
+    const almost = { ...nothing, name: 'Gradual G', phone: '94397 12994', age: 29, photo_path: '/uploads/avatars/7-0123456789ab.jpg' };
+    const ladder = [
+      profileLib.completeness({ ...nothing, name: 'Gradual G' }).percent,
+      profileLib.completeness({ ...nothing, name: 'Gradual G', phone: '94397 12994' }).percent,
+      profileLib.completeness({ ...almost, photo_path: null }).percent,
+      profileLib.completeness(almost).percent,
+      profileLib.completeness({ ...almost, address: 'Near Lucky Mess' }).percent,
+      profileLib.completeness({ ...almost, address: 'Near Lucky Mess', block: 'Bhadrak Block' }).percent,
+    ];
+    record(
+      'the bar reads 20 / 40 / 60 / 80 / 80 / 100 as the details land',
+      ladder.join(',') === '20,40,60,80,80,100',
+      ladder.join(' → '),
+    );
+    record(
+      'an address with no Block chosen does not close the profile',
+      profileLib.completeness({ ...almost, address: 'Near Lucky Mess' }).percent === 80,
+    );
+    record(
+      '…and neither does every detail except the name',
+      profileLib.completeness({ ...almost, name: '', address: 'Near Lucky Mess', block: 'Bhadrak Block' }).percent === 80,
+    );
+    record(
+      'the missing list names what is still to add',
+      profileLib.completeness({ ...nothing, name: 'Gradual G' }).missing.join(',') === 'phone number,age,profile photo,address,Block',
+      profileLib.completeness({ ...nothing, name: 'Gradual G' }).missing.join(', '),
+    );
+    record('an age of 0 or 200 is never accepted by the maths', profileLib.normalizeAge('0') === null && profileLib.normalizeAge('200') === null && profileLib.normalizeAge('29') === 29);
+    record('a Block typed by hand is checked against the list', profileLib.isBlock('Bhadrak Block') && !profileLib.isBlock('Kolkata Block'));
+
+    const blockRow = makeUser(`check-block-${Date.now()}@invalid.example`, 'Column Check');
+    let blocksWritten = 0;
+    for (const block of profileLib.BLOCKS) {
+      try {
+        db.run('UPDATE users SET block = ? WHERE id = ?', block, blockRow.id);
+        blocksWritten += 1;
+      } catch {
+        /* counted by the record below */
+      }
+    }
+    record('the column accepts every Block the dropdown offers', blocksWritten === profileLib.BLOCKS.length, `${blocksWritten}/${profileLib.BLOCKS.length}`);
+    let foreignBlockError = null;
+    try {
+      db.run('UPDATE users SET block = ? WHERE id = ?', 'Kolkata Block', blockRow.id);
+    } catch (error) {
+      foreignBlockError = error;
+    }
+    record('…and the database itself refuses one outside the seven', Boolean(foreignBlockError), foreignBlockError ? 'constraint fired' : 'row written');
+    let sillyAgeError = null;
+    try {
+      db.run('UPDATE users SET age = ? WHERE id = ?', 0, blockRow.id);
+    } catch (error) {
+      sillyAgeError = error;
+    }
+    record('the same column guard covers the age', Boolean(sillyAgeError), sillyAgeError ? 'constraint fired' : 'row written');
+
+    record(
+      'a path outside the avatars folder is never treated as one of ours',
+      ['../../public/assets/hero.jpg', '/uploads/avatars/../secrets.env', '/uploads/avatars/', 'uploads/avatars/x.jpg',
+       '/uploads/avatars/nested/x.jpg', '/uploads/avatars/x.png?token=1', '/etc/passwd', '']
+        .every((candidate) => uploads.safeRelativePath(candidate) === null)
+        && uploads.safeRelativePath('/uploads/avatars/7-0123456789ab.jpg') === '/uploads/avatars/7-0123456789ab.jpg',
+    );
+    record('deleting a photo leaves any file it does not own alone', uploads.removeAvatar('/assets/hero.jpg') === false);
+
+    const pngBytes = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d]);
+    record('real PNG bytes are accepted', uploads.decodeImage(`data:image/png;base64,${pngBytes.toString('base64')}`).ok === true);
+    const svgBytes = Buffer.from('<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>');
+    const forgery = uploads.decodeImage(`data:image/png;base64,${svgBytes.toString('base64')}`);
+    record('bytes that are not a picture are refused whatever mime they claim', forgery.ok === false, forgery.error);
+    record('junk that is not base64 at all is refused', uploads.decodeImage('data:image/png;base64,!!!!not base64!!!!').ok === false);
+    record('an oversized payload is refused before anything is written', uploads.decodeImage(`data:image/png;base64,${'A'.repeat(uploads.MAX_BYTES * 2)}`).ok === false);
+    record('an empty pick is a skip, not an error', uploads.decodeImage('').skipped === true);
+
+    const gateClosed = gateOutcome(users.findById(userA.id));
+    record(
+      'a signed-in customer with an incomplete profile cannot open the booking page',
+      gateClosed.reached === false && gateClosed.redirect === '/account/profile',
+      gateClosed.redirect,
+    );
+    const gateJson = gateOutcome(users.findById(userA.id), 'json');
+    record(
+      '…and the booking API answers 403 instead of a redirect a script can follow',
+      gateJson.reached === false && Boolean(gateJson.payload) && gateJson.payload.profileIncomplete === true
+        && gateJson.payload.redirectTo === '/account/profile',
+      gateJson.payload ? String(gateJson.payload.error).slice(0, 40) : 'no JSON',
+    );
+    record('an anonymous request is sent to sign in first', gateOutcome(null).redirect === '/auth/login');
+    record('staff logins are exempt — they book at the counter', gateOutcome(users.findById(staffUser.id)).reached === true);
+
+    const filled = users.setPhoto(
+      users.updateProfile(userA.id, {
+        name: 'Gradual G',
+        phone: '94397 12994',
+        age: 29,
+        address: 'Near Lucky Mess, College Road',
+        block: 'Bhadrak Block',
+      }).id,
+      '/uploads/avatars/7-0123456789ab.jpg',
+    );
+    record('a complete profile gets through the gate', gateOutcome(filled).reached === true, `${profileLib.completeness(filled).percent}%`);
+    record('…and it closes again the moment one detail is taken back out', gateOutcome(users.setPhoto(userA.id, null)).reached === false);
+
+    const preserved = users.updateProfile(userA.id, { notes: 'Prefers mornings' });
+    record(
+      'a save that omits a detail leaves the stored value in place',
+      preserved.age === 29 && preserved.block === 'Bhadrak Block' && Boolean(preserved.address),
+    );
+    record('…but a Block the form never offered is dropped rather than written', users.updateProfile(userA.id, { block: 'Delhi Block' }).block === null);
 
     const wallClock = dates.slotToIso(date, '10:30');
     record(
