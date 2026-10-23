@@ -1,0 +1,127 @@
+<%- include('../partials/head') %>
+
+<section class="section" aria-labelledby="page-title">
+  <div class="wrap">
+    <p class="eyebrow">Your account</p>
+    <h1 id="page-title"><%= currentUser.name %></h1>
+    <p class="lede">
+      Signed in as <%= currentUser.email %>. This page is private to you and the salon team.
+      <% if (isAdmin) { %> <a class="btn btn--sm btn--primary" href="/admin">Staff area</a><% } %>
+    </p>
+  </div>
+</section>
+
+<section class="section section--panel" aria-labelledby="open-title">
+  <div class="wrap booking-layout">
+    <div>
+      <h2 id="open-title">Your appointments</h2>
+
+      <% if (!bookings.length) { %>
+        <p class="empty">
+          You have no bookings yet. Choose a service and a free time and the request will show here.
+        </p>
+        <p class="form-actions"><a class="btn" href="/book">Book an appointment</a></p>
+      <% } else { %>
+        <div class="admin-list mt-1">
+          <% active.forEach(function (booking) { %>
+            <article class="card card--accent">
+              <div class="flex flex--between">
+                <h3 class="card__title mb-0"><%= booking.service_name %></h3>
+                <span class="pill pill--<%= booking.status %>"><%= booking.status %></span>
+              </div>
+              <p class="muted small mt-1"><%= booking.category_name %> · <%= booking.duration_minutes %> min · reference #<%= booking.id %></p>
+              <dl class="summary">
+                <dt>Day</dt><dd><%= booking.dayLabel %></dd>
+                <dt>Time</dt><dd><%= booking.timeLabel %></dd>
+                <dt>Requested</dt><dd><%= dates.formatStamp(booking.created_at) %></dd>
+                <% if (booking.note) { %><dt>Your note</dt><dd><%= booking.note %></dd><% } %>
+                <% if (booking.staff_note) { %><dt>Studio note</dt><dd><%= booking.staff_note %></dd><% } %>
+              </dl>
+
+              <% if (booking.status === 'pending') { %>
+                <p class="alert alert--info mt-1">
+                  Waiting for the studio to confirm. Call
+                  <a href="tel:<%= phone %>"><%= phone %></a> and quote #<%= booking.id %> if your
+                  appointment is within the next day or two.
+                </p>
+              <% } else { %>
+                <p class="alert alert--success mt-1">Confirmed — please arrive a few minutes before your slot.</p>
+              <% } %>
+
+              <div class="form-actions">
+                <form method="post" action="/account/bookings/<%= booking.id %>/cancel" data-once>
+                  <%- csrfField() %>
+                  <button class="btn btn--danger btn--sm" type="submit">Cancel this booking</button>
+                </form>
+                <a class="btn btn--ghost btn--sm" href="/book">Book another time</a>
+              </div>
+              <p class="hint">Cancelling frees the slot for other clients straight away.</p>
+            </article>
+          <% }) %>
+        </div>
+
+        <% if (history.length) { %>
+          <h2 class="mt-3">Past and closed requests</h2>
+          <div class="table-wrap">
+            <table>
+              <caption class="sr-only">Bookings that are finished, declined or cancelled</caption>
+              <thead>
+                <tr><th scope="col">Ref</th><th scope="col">Service</th><th scope="col">Day</th><th scope="col">Time</th><th scope="col">Status</th></tr>
+              </thead>
+              <tbody>
+                <% history.forEach(function (booking) { %>
+                  <tr>
+                    <th scope="row">#<%= booking.id %></th>
+                    <td><%= booking.service_name %></td>
+                    <td class="nowrap"><%= booking.dayLabel %></td>
+                    <td class="nowrap"><%= booking.timeLabel %></td>
+                    <td><span class="pill pill--<%= booking.status %>"><%= booking.status %></span></td>
+                  </tr>
+                <% }) %>
+              </tbody>
+            </table>
+          </div>
+        <% } %>
+      <% } %>
+    </div>
+
+    <aside class="aside stack">
+      <div class="card card--flat">
+        <h2 class="card__title">Your details</h2>
+        <dl class="summary">
+          <dt>Name</dt><dd><%= currentUser.name %></dd>
+          <dt>Email</dt><dd><%= currentUser.email %></dd>
+          <dt>Phone</dt><dd><%= currentUser.phone || 'Not given' %></dd>
+          <dt>Called as</dt><dd><%= currentUser.preferred_title || 'Not set' %></dd>
+          <dt>Member since</dt><dd><%= dates.formatStampDate(currentUser.created_at) %></dd>
+          <dt>Open requests</dt><dd><%= active.length %></dd>
+        </dl>
+        <p class="form-actions">
+          <a class="btn btn--ghost btn--sm" href="/account/profile">Edit my details</a>
+        </p>
+      </div>
+
+      <div class="card card--flat">
+        <h2 class="card__title">Status meanings</h2>
+        <p class="small"><span class="pill pill--pending">Pending</span> — held for you, the studio has not confirmed yet.</p>
+        <p class="small"><span class="pill pill--confirmed">Confirmed</span> — the studio accepted the time.</p>
+        <p class="small"><span class="pill pill--rejected">Declined</span> — the studio could not take it; the time is free again.</p>
+        <p class="small"><span class="pill pill--cancelled">Cancelled</span> — closed by you or the team.</p>
+      </div>
+
+      <div class="card card--flat">
+        <h2 class="card__title">Privacy</h2>
+        <p class="small">
+          Only you and the salon team can read this page. No payment details are collected here.
+        </p>
+        <form method="post" action="/auth/logout">
+          <%- csrfField() %>
+          <button class="btn btn--ghost btn--sm" type="submit">Sign out</button>
+        </form>
+        <p class="hint">Use this on a shared phone so nobody else opens your bookings.</p>
+      </div>
+    </aside>
+  </div>
+</section>
+
+<%- include('../partials/footer') %>

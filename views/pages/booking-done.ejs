@@ -1,0 +1,63 @@
+<%- include('../partials/head') %>
+
+<section class="section" aria-labelledby="page-title">
+  <div class="wrap wrap--narrow">
+    <div class="card card--accent">
+      <p class="eyebrow">Request sent</p>
+      <h1 id="page-title">The studio has your request</h1>
+      <p class="lede">
+        Reference <strong>#<%= booking.id %></strong> — <%= booking.service_name %> on
+        <strong><%= booking.dayLabel %></strong> at <%= booking.timeLabel %>.
+      </p>
+
+      <p class="pill pill--pending mt-1">Pending — waiting for the studio to confirm</p>
+
+      <dl class="summary mt-2">
+        <dt>Service</dt><dd><%= booking.service_name %></dd>
+        <dt>Group</dt><dd><%= booking.category_name %></dd>
+        <dt>Day</dt><dd><%= booking.dayLabel %></dd>
+        <dt>Time held</dt><dd><%= booking.range %></dd>
+        <dt>Name</dt><dd><%= booking.contact_name %></dd>
+        <dt>Number</dt><dd><%= booking.contact_phone || '—' %></dd>
+        <dt>Called as</dt><dd><%= booking.preferred_title || '—' %></dd>
+        <dt>Your note</dt><dd><%= booking.note || '—' %></dd>
+        <dt>Price</dt><dd><%= booking.price_text || 'Confirmed at the studio' %></dd>
+      </dl>
+
+      <hr class="rule">
+
+      <h2 class="card__title">What happens next</h2>
+      <ul class="timeline">
+        <li>
+          <strong>Request received</strong> — your slot is held and removed from the public list.
+          <time>Sent <%= dates.formatStamp(booking.created_at) %></time>
+        </li>
+        <li>
+          <strong>Studio confirms</strong> — the team accepts the time at the counter, and your account
+          page changes to <span class="pill pill--confirmed">Confirmed</span>.
+        </li>
+        <li>
+          <strong>If it cannot fit</strong> — the studio marks it declined or calls you to move it, and the
+          time goes back into the diary.
+        </li>
+      </ul>
+
+      <p class="form-note mt-2">
+        <% if (mailEnabled) { %>
+          A copy went to <%= currentUser.email %>. Keep the reference number for the counter.
+        <% } else { %>
+          Email delivery is not configured on this website yet, so keep this page or note the reference
+          number — your account page always shows the live status.
+        <% } %>
+      </p>
+
+      <div class="form-actions">
+        <a class="btn btn--primary" href="/account">My bookings</a>
+        <a class="btn btn--ghost" href="/book">Book another service</a>
+        <a class="btn btn--ghost" href="tel:<%= phone %>">Call <%= phone %></a>
+      </div>
+    </div>
+  </div>
+</section>
+
+<%- include('../partials/footer') %>

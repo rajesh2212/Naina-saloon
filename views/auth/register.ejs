@@ -1,0 +1,96 @@
+<%- include('../partials/head') %>
+
+<section class="section" aria-labelledby="page-title">
+  <div class="wrap wrap--narrow">
+    <div class="card card--accent">
+      <p class="eyebrow">New account</p>
+      <h1 id="page-title">Create your account</h1>
+      <p class="muted">
+        Three things are needed: your name, an email for password recovery, and a password. We do not
+        ask your gender — use the title box only if you want the studio to call you something specific.
+      </p>
+
+      <% if (errors.form) { %><p class="alert alert--error" role="alert"><%= errors.form %></p><% } %>
+
+      <form method="post" action="/auth/register" class="mt-2" data-once>
+        <%- csrfField() %>
+        <input type="text" name="website" value="" class="hp-field" tabindex="-1" autocomplete="off" aria-hidden="true">
+
+        <div class="field">
+          <label for="name">Your name</label>
+          <input class="input" id="name" name="name" type="text" autocomplete="name" required
+                 maxlength="80" value="<%= values.name || '' %>"
+                 <% if (errors.name) { %>aria-invalid="true" aria-describedby="name-error"<% } %>>
+          <% if (errors.name) { %><p class="error" id="name-error"><%= errors.name %></p><% } %>
+          <p class="hint">The name the studio greets you with and writes in the diary.</p>
+        </div>
+
+        <div class="field">
+          <label for="preferred_title">Title <span class="optional">(optional)</span></label>
+          <input class="input" id="preferred_title" name="preferred_title" type="text"
+                 autocomplete="nickname" maxlength="24" placeholder="Ms., Mr., Mx., or leave blank"
+                 value="<%= values.preferredTitle || '' %>"
+                 <% if (errors.preferredTitle) { %>aria-invalid="true" aria-describedby="title-error"<% } %>>
+          <% if (errors.preferredTitle) { %><p class="error" id="title-error"><%= errors.preferredTitle %></p><% } %>
+        </div>
+
+        <div class="field">
+          <label for="email">Email address</label>
+          <input class="input" id="email" name="email" type="email" inputmode="email"
+                 autocomplete="email" required maxlength="200" value="<%= values.email || '' %>"
+                 <% if (errors.email) { %>aria-invalid="true" aria-describedby="email-error"<% } %>>
+          <% if (errors.email) { %><p class="error" id="email-error"><%= errors.email %></p><% } %>
+        </div>
+
+        <div class="field">
+          <label for="phone">Mobile number <span class="optional">(optional, but the studio books faster with it)</span></label>
+          <input class="input" id="phone" name="phone" type="tel" inputmode="tel"
+                 autocomplete="tel" maxlength="20" value="<%= values.phone || '' %>"
+                 <% if (errors.phone) { %>aria-invalid="true" aria-describedby="phone-error"<% } %>>
+          <% if (errors.phone) { %><p class="error" id="phone-error"><%= errors.phone %></p><% } %>
+        </div>
+
+        <div class="field">
+          <label for="password">Password</label>
+          <input class="input" id="password" name="password" type="password"
+                 autocomplete="new-password" required minlength="10"
+                 aria-describedby="password-hint<%= errors.password ? ' password-error' : '' %>"
+                 <% if (errors.password) { %>aria-invalid="true"<% } %>>
+          <% if (errors.password) { %><p class="error" id="password-error"><%= errors.password %></p><% } %>
+          <p class="hint" id="password-hint">At least 10 characters, with a letter and a number. Stored only as a salted hash.</p>
+        </div>
+
+        <div class="field">
+          <label for="confirm_password">Type the password again</label>
+          <input class="input" id="confirm_password" name="confirm_password" type="password"
+                 autocomplete="new-password" required
+                 <% if (errors.confirm) { %>aria-invalid="true" aria-describedby="confirm-error"<% } %>>
+          <% if (errors.confirm) { %><p class="error" id="confirm-error"><%= errors.confirm %></p><% } %>
+        </div>
+
+        <div class="field">
+          <div class="checkline">
+            <input type="checkbox" id="contact_ok" name="contact_ok" value="1"
+                   <% if (values.contactOk) { %>checked<% } %>
+                   <% if (errors.terms) { %>aria-invalid="true" aria-describedby="terms-error"<% } %>>
+            <label for="contact_ok">The studio may contact me about my appointments on the number or email I give.</label>
+          </div>
+          <% if (errors.terms) { %><p class="error" id="terms-error"><%= errors.terms %></p><% } %>
+        </div>
+
+        <%- include('../partials/captcha') %>
+
+        <div class="form-actions">
+          <button class="btn" type="submit">Create account</button>
+          <a class="btn btn--ghost" href="/auth/login">I already have an account</a>
+        </div>
+        <p class="form-note">
+          Your details are used for bookings at this studio only. Passwords are hashed with bcrypt and
+          sessions are kept in server-side, HTTP-only cookies — never in your browser’s storage.
+        </p>
+      </form>
+    </div>
+  </div>
+</section>
+
+<%- include('../partials/footer') %>

@@ -1,0 +1,105 @@
+<%- include('../partials/head') %>
+
+<section class="section" aria-labelledby="page-title">
+  <div class="wrap wrap--read">
+    <p class="eyebrow">The studio</p>
+    <h1 id="page-title">Naina Beauty Parlour — Salon Make-up Studio</h1>
+    <p class="lede">
+      A beauty parlour on College Road in Bagurai, Jagannathpur, serving the town and the surrounding
+      Bhadrak area since <%= salon.since %>.
+    </p>
+  </div>
+</section>
+
+<section class="section section--alt" aria-labelledby="what-title">
+  <div class="wrap grid grid--2">
+    <div>
+      <h2 id="what-title">What the studio is known for</h2>
+      <p>
+        Function and bridal work is the heart of the parlour: wedding-day makeup, reception looks,
+        engagement and party makeup, the saree drape that goes with it, and the hair styling that
+        finishes the day. Around that sits everyday parlour work — threading and waxing, facials and
+        clean-ups, haircuts, colour, smoothing and keratin sessions, treatments for the lengths and
+        scalp, brow and eyelid styling, and contact-lens and lash work.
+      </p>
+      <p>
+        Because the same team does both the wedding mornings and the walk-in threading, the diary is
+        kept tight. That is why this booking page shows only the times that are genuinely free, and why
+        a request is confirmed by the studio rather than automatic.
+      </p>
+      <p>
+        Prices are not published here. Chair time is: each service lists the minutes the studio holds
+        for it, which is what decides which slots you can take.
+      </p>
+    </div>
+
+    <div class="card card--accent">
+      <h3 class="card__title">At a glance</h3>
+      <ul class="info-list">
+        <li><span class="marker" aria-hidden="true">·</span><p><strong>Since</strong> <%= salon.since %></p></li>
+        <li><span class="marker" aria-hidden="true">·</span><p><strong>Groups</strong> <%= stats.categories %> service categories</p></li>
+        <li><span class="marker" aria-hidden="true">·</span><p><strong>Bookable online</strong> <%= stats.bookable %> services</p></li>
+        <li><span class="marker" aria-hidden="true">·</span><p><strong>Opens</strong> <%= salon.opensAtLabel %></p></li>
+        <li><span class="marker" aria-hidden="true">·</span><p><strong>Phone</strong> <a href="tel:<%= salon.phoneHref %>"><%= salon.phone %></a></p></li>
+        <li><span class="marker" aria-hidden="true">·</span><p><strong>Address</strong> <%= salon.address %></p></li>
+      </ul>
+      <p class="form-actions">
+        <a class="btn" href="<%= salon.mapsUrl %>" rel="noopener noreferrer" target="_blank">Directions</a>
+        <a class="btn btn--ghost" href="/services">Service list</a>
+      </p>
+    </div>
+  </div>
+</section>
+
+<section class="section" id="inclusion" aria-labelledby="inclusion-title">
+  <div class="wrap wrap--read">
+    <p class="eyebrow">Welcome note</p>
+    <h2 id="inclusion-title">Book as yourself</h2>
+    <p>
+      The catalogue leads with women’s beauty services because that is what the studio does most of.
+      Booking does not ask what gender you are. There is no gender field, no assumption in the form,
+      and the optional title box accepts Ms., Mr., Mx. or anything else you would like the team to use.
+    </p>
+    <p>
+      LGBTQ+ clients are welcome — for a function look, a threading session, bridal work for a partner
+      or family member, or anything else on the list. If you would rather talk to the studio before
+      booking, call <a href="tel:<%= salon.phoneHref %>"><%= salon.phone %></a> and ask; the team will tell
+      you plainly whether a service is something they can do for you on the day.
+    </p>
+    <p>
+      Your details are used for the appointment only: the studio sees your name, number and note so it
+      can confirm the time. Nothing is sold or shared, and payment is not taken through this website.
+    </p>
+  </div>
+</section>
+
+<section class="section section--panel" aria-labelledby="expect-title">
+  <div class="wrap grid grid--3">
+    <div>
+      <h2 id="expect-title">Before you come</h2>
+      <ul>
+        <li>Arrive a few minutes before your slot so the chair time is used fully.</li>
+        <li>Carry the reference number from your account page if you booked online.</li>
+        <li>For colour, smoothing and lash work, the studio asks what you have used before — tell them at the appointment.</li>
+      </ul>
+    </div>
+    <div>
+      <h3>Changing a booking</h3>
+      <ul>
+        <li>Cancel from your account and the time goes back into the diary for someone else.</li>
+        <li>Then take a new slot, or call the studio and the team will move it for you.</li>
+        <li>Same-day bookings need the notice period listed on the booking page.</li>
+      </ul>
+    </div>
+    <div>
+      <h3>Questions</h3>
+      <ul>
+        <li>Phone the studio: <a href="tel:<%= salon.phoneHref %>"><%= salon.phone %></a>.</li>
+        <li>Directions: <a href="<%= salon.mapsUrl %>" rel="noopener noreferrer" target="_blank">Google Maps</a>.</li>
+        <li>Find the page here: <a href="/location">Find us</a>.</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<%- include('../partials/footer') %>

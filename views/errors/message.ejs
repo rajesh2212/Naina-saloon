@@ -1,0 +1,17 @@
+<%- include('../partials/head') %>
+
+<section class="section" aria-labelledby="page-title">
+  <div class="wrap wrap--read">
+    <p class="eyebrow"><%= status >= 500 ? 'Server problem' : 'Check this' %></p>
+    <h1 id="page-title"><%= title %></h1>
+    <p class="lede"><%= message %></p>
+    <p class="muted small">Reference: <%= status %></p>
+    <div class="form-actions">
+      <a class="btn btn--primary" href="/book">Try booking again</a>
+      <a class="btn btn--ghost" href="/">Home</a>
+      <a class="btn btn--ghost" href="tel:<%= salon.phoneHref %>">Call <%= salon.phone %></a>
+    </div>
+  </div>
+</section>
+
+<%- include('../partials/footer') %>

@@ -1,0 +1,241 @@
+<%- include('../partials/head') %>
+
+<%
+  /* EJS puts locals in scope through `with`, so defaults are read off `locals`
+     rather than re-declared with the same name. */
+  var showStep = typeof locals.step !== 'undefined' ? locals.step : 1;
+  var service = locals.chosen || null;
+  var avail = locals.availability || { slots: [], notice: '' };
+  var strip = locals.dateStrip || [];
+  var minD = locals.minDate || null;
+  var maxD = locals.maxDate || null;
+  var ruleSet = locals.rules || bookingRules;
+  var needSignIn = typeof locals.requiresSignIn !== 'undefined' ? locals.requiresSignIn : !currentUser;
+  var errs = locals.errors || {};
+  var vals = locals.values || {};
+  var picked = locals.date || '';
+  var signInNext = service
+    ? encodeURIComponent('/book/' + service.id + (picked ? '?date=' + picked : ''))
+    : encodeURIComponent('/book');
+%>
+
+<section class="section" aria-labelledby="page-title">
+  <div class="wrap">
+    <p class="eyebrow">Appointments</p>
+    <h1 id="page-title"><%= showStep === 1 ? 'Book an appointment' : service.name %></h1>
+    <p class="lede">
+      Times below come from the studio’s live diary — a slot somebody else has just requested
+      disappears. Requests start as <strong>pending</strong> and the studio confirms them. No payment is
+      taken on this website.
+    </p>
+
+    <% if (errs.form) { %><p class="alert alert--error mt-2" role="alert"><%= errs.form %></p><% } %>
+  </div>
+</section>
+
+<section class="section section--panel" aria-labelledby="step-1">
+  <div class="wrap">
+    <h2 id="step-1">
+      <% if (showStep === 1) { %>1. Choose your service<% } else { %><a href="/book">1. Choose your service</a><% } %>
+    </h2>
+
+    <form method="get" action="/book" class="grid grid--2 mt-1">
+      <div class="field">
+        <label for="service">Service</label>
+        <select class="select" id="service" name="service" required>
+          <option value="">Select a service…</option>
+          <% groups.forEach(function (group) { %>
+            <optgroup label="<%= group.name %>">
+              <% group.services.forEach(function (item) { %>
+                <option value="<%= item.id %>" <%= service && service.id === item.id ? 'selected' : '' %>>
+                  <%= item.name %> — <%= item.duration_minutes %> min
+                </option>
+              <% }) %>
+            </optgroup>
+          <% }) %>
+        </select>
+        <p class="hint">The minutes shown are how long the studio holds the chair.</p>
+      </div>
+
+      <div class="field">
+        <label for="date-pick">Date</label>
+        <input class="input" id="date-pick" name="date" type="date"
+               <% if (minD) { %>min="<%= minD %>"<% } %>
+               <% if (maxD) { %>max="<%= maxD %>"<% } %>
+               value="<%= picked %>">
+        <p class="hint">Up to <%= ruleSet.horizonDays %> days ahead. Same-day requests need <%= ruleSet.leadMinutes %> minutes’ notice.</p>
+      </div>
+
+      <div class="form-actions span-all">
+        <button class="btn btn--primary" type="submit">Show free times</button>
+        <span class="form-note">You can look at times before signing in — only sending a request needs an account.</span>
+      </div>
+    </form>
+  </div>
+</section>
+
+<% if (service) { %>
+  <section class="section" aria-labelledby="step-2">
+    <div class="wrap booking-layout">
+      <div>
+        <h2 id="step-2">2. Pick a day</h2>
+        <p class="muted small">
+          Days that cannot fit a <%= service.duration_minutes %>-minute service are marked “full”.
+        </p>
+
+        <div class="picker" role="group" aria-label="Choose a date">
+          <% strip.forEach(function (entry) { %>
+            <a class="picker__item <%= entry.count === 0 ? 'picker__item--none' : '' %>"
+               href="/book/<%= service.id %>?date=<%= entry.date %>"
+               data-date-link
+               data-day-label="<%= entry.label %>"
+               aria-current="<%= entry.selected ? 'true' : 'false' %>"
+               aria-label="<%= entry.label %>: <%= entry.count ? entry.count + ' free times' : 'fully booked' %>">
+              <span><%= entry.isToday ? 'Today' : entry.label %></span>
+              <small><%= entry.count ? entry.count + ' free' : 'full' %></small>
+            </a>
+          <% }) %>
+        </div>
+
+        <h2 class="mt-3">3. Choose a time — <span data-selected-day><%= dates.formatShortDate(picked) %></span></h2>
+
+        <form method="post" action="/book" data-slots-form
+              data-slots-endpoint="/book/<%= service.id %>/slots" data-once>
+          <%- csrfField() %>
+          <input type="hidden" name="service_id" value="<%= service.id %>">
+          <input type="hidden" name="date" value="<%= picked %>">
+
+          <p class="loading" data-slot-loading aria-hidden="true">
+            <span class="spinner"></span> Loading the studio’s diary…
+          </p>
+
+          <fieldset class="mt-1">
+            <legend class="sr-only">Free appointment times</legend>
+            <% if (avail.slots.length) { %>
+              <div class="slots" data-slot-list>
+                <% avail.slots.forEach(function (slot) { %>
+                  <label class="slot">
+                    <input type="radio" name="slot_id" value="<%= slot.id %>" data-start="<%= slot.label %>">
+                    <span>
+                      <strong><%= slot.label %></strong>
+                      <small>till <%= slot.endLabel %></small>
+                    </span>
+                  </label>
+                <% }) %>
+              </div>
+            <% } else { %>
+              <div class="slots" data-slot-list></div>
+              <p class="empty"><%= avail.notice || 'No free times on that date.' %></p>
+            <% } %>
+          </fieldset>
+
+          <p class="hint" data-slot-status role="status">
+            <% if (avail.slots.length) { %><%= avail.slots.length %> free times on this day. Select one.<% } %>
+          </p>
+
+          <% if (errs.slot) { %><p class="error" role="alert"><%= errs.slot %></p><% } %>
+
+          <div class="grid grid--2 mt-3">
+            <div class="field">
+              <label for="contact_phone">Number the studio can call</label>
+              <input class="input" id="contact_phone" name="contact_phone" type="tel" inputmode="tel"
+                     autocomplete="tel" required maxlength="20" value="<%= vals.contactPhone || '' %>"
+                     aria-describedby="phone-hint<%= errs.phone ? ' phone-error' : '' %>"
+                     <% if (errs.phone) { %>aria-invalid="true"<% } %>>
+              <% if (errs.phone) { %><p class="error" id="phone-error"><%= errs.phone %></p><% } %>
+              <p class="hint" id="phone-hint">Kept on the booking so the counter can confirm or reschedule.</p>
+            </div>
+
+            <div class="field">
+              <label for="preferred_title">What should we call you? <span class="optional">(optional)</span></label>
+              <input class="input" id="preferred_title" name="preferred_title" type="text" maxlength="24"
+                     autocomplete="nickname" placeholder="Ms., Mr., Mx., or blank"
+                     value="<%= vals.preferredTitle || '' %>">
+              <p class="hint">You are never asked for your gender.</p>
+            </div>
+
+            <div class="field span-all">
+              <label for="note">Anything the studio should know <span class="optional">(optional)</span></label>
+              <textarea class="textarea" id="note" name="note" rows="3" maxlength="500"
+                        placeholder="Which function it is for, hair length, travelling with family…"><%= vals.note || '' %></textarea>
+              <% if (errs.note) { %><p class="error"><%= errs.note %></p><% } %>
+            </div>
+          </div>
+
+          <div class="form-actions">
+            <% if (needSignIn) { %>
+              <p class="alert alert--info w-full">
+                <strong>Sign in to send the request.</strong>
+                <span class="small">You have reached the last step — accounts are free and take about a minute.</span>
+              </p>
+              <a class="btn" href="/auth/login?next=<%= signInNext %>">Sign in and continue</a>
+              <a class="btn btn--ghost" href="/auth/register?next=<%= signInNext %>">Create an account</a>
+            <% } else { %>
+              <button class="btn" type="submit" data-confirm-button disabled>
+                Request this slot <span class="btn__hint" data-selection-hint></span>
+              </button>
+              <a class="btn btn--ghost" href="/services">Change service</a>
+            <% } %>
+          </div>
+
+          <% if (!needSignIn) { %>
+            <p class="form-note">
+              Sending this holds the time as a <strong>pending</strong> request. The studio confirms it from
+              the counter, and you can cancel from your account — which frees the slot again.
+            </p>
+          <% } %>
+        </form>
+      </div>
+
+      <aside class="aside card card--accent">
+        <h2 class="card__title">What you are booking</h2>
+        <dl class="summary">
+          <dt>Service</dt><dd><%= service.name %></dd>
+          <dt>Group</dt><dd><%= service.category_name %></dd>
+          <dt>Chair time</dt><dd><%= service.duration_minutes %> min</dd>
+          <dt>Day</dt><dd><%= dates.formatLongDate(picked) %></dd>
+          <dt>Free times</dt><dd><%= avail.slots.length %></dd>
+          <dt>Price</dt><dd><%= service.price_text || 'At the studio' %></dd>
+          <dt>Payment</dt><dd>None online</dd>
+        </dl>
+        <hr class="rule">
+        <h3 class="card__title">Need help?</h3>
+        <p class="small">
+          Call the studio on <a href="tel:<%= salon.phoneHref %>"><%= salon.phone %></a> for wedding
+          combinations, group bookings, or a time that is not showing.
+        </p>
+        <p class="badge-row">
+          <span class="badge">Slots every <%= ruleSet.stepMinutes %> min</span>
+          <span class="badge badge--muted">Open bookings per account: <%= ruleSet.maxActivePerUser %></span>
+        </p>
+      </aside>
+    </div>
+  </section>
+<% } else { %>
+  <section class="section" aria-labelledby="browse-title">
+    <div class="wrap">
+      <h2 id="browse-title">Or start from a service group</h2>
+      <div class="grid grid--3">
+        <% groups.forEach(function (group) { %>
+          <article class="card service-card">
+            <h3 class="card__title"><%= group.name %></h3>
+            <ul class="small">
+              <% group.services.slice(0, 4).forEach(function (item) { %>
+                <li><a href="/book/<%= item.id %>"><%= item.name %></a> — <%= item.duration_minutes %> min</li>
+              <% }) %>
+            </ul>
+            <% if (group.services.length > 4) { %>
+              <p class="card__meta"><a href="/services/<%= group.services[0].category_slug %>">See all <%= group.services.length %></a></p>
+            <% } %>
+          </article>
+        <% }) %>
+      </div>
+      <p class="hint mt-2">
+        The diary offers slots every <%= ruleSet.stepMinutes %> minutes between <%= salon.opensAtLabel %> and
+        the studio’s closing time for that day.
+      </p>
+    </div>
+  </section>
+<% } %>
+
+<%- include('../partials/footer') %>

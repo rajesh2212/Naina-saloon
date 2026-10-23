@@ -1,0 +1,76 @@
+<%- include('../partials/head') %>
+
+<section class="section" aria-labelledby="page-title">
+  <div class="wrap grid grid--2">
+    <div>
+      <p class="eyebrow">Appointments</p>
+      <h1 id="page-title">How booking works</h1>
+      <p class="lede">
+        The website shows the studio’s real diary. Times you see are times the team has opened; times
+        somebody else has just requested disappear from the list.
+      </p>
+
+      <h2 class="mt-3">The five steps</h2>
+      <ol class="steps">
+        <li>
+          <h3>Make an account</h3>
+          <p>
+            Name, email and a password — plus the human check. No gender is asked for. Your password is
+            stored only as a salted hash, never in plain text.
+          </p>
+        </li>
+        <li>
+          <h3>Choose the service</h3>
+          <p>Each service carries the chair time the studio holds for it, so a 3-hour keratin session will not fit into a short slot.</p>
+        </li>
+        <li>
+          <h3>Pick a day with room left</h3>
+          <p>The date strip shows how many times are still open on each day, up to <%= rules.horizonDays %> days ahead.</p>
+        </li>
+        <li>
+          <h3>Take a time and send the request</h3>
+          <p>Add a phone number the studio can call and any note — which function it is for, how long your hair is, whether you are a group of two.</p>
+        </li>
+        <li>
+          <h3>Pending, then confirmed</h3>
+          <p>
+            Every request arrives at the counter as <span class="pill pill--pending">Pending</span>. When the
+            team accepts it, your account shows <span class="pill pill--confirmed">Confirmed</span>. Only
+            pending and confirmed requests hold a slot.
+          </p>
+        </li>
+      </ol>
+
+      <div class="form-actions">
+        <a class="btn" href="/book">Choose a service and time</a>
+        <a class="btn btn--ghost" href="/auth/register">Create an account</a>
+      </div>
+    </div>
+
+    <aside class="card card--flat" aria-labelledby="rules-title">
+      <h2 id="rules-title" class="card__title">The rules the diary applies</h2>
+      <dl class="summary">
+        <dt>Slot spacing</dt><dd><%= rules.stepMinutes %> min</dd>
+        <dt>Book ahead</dt><dd><%= rules.horizonDays %> days</dd>
+        <dt>Same-day notice</dt><dd><%= rules.leadMinutes %> min</dd>
+        <dt>Open bookings per account</dt><dd><%= rules.maxActivePerUser %></dd>
+        <dt>Opens</dt><dd><%= salon.opensAtLabel %></dd>
+        <dt>Payment online</dt><dd>None</dd>
+      </dl>
+      <hr class="rule">
+      <h3 class="card__title">If something goes wrong</h3>
+      <ul>
+        <li><strong>“That time is no longer free”</strong> — somebody took it a moment before. The list refreshes; pick the next one.</li>
+        <li><strong>No slots on a day</strong> — the studio has that day full or closed. Try another day or call ahead.</li>
+        <li><strong>CAPTCHA will not read</strong> — call <a href="tel:<%= salon.phoneHref %>"><%= salon.phone %></a> and the team books it for you.</li>
+        <li><strong>Forgotten password</strong> — use <a href="/auth/forgot-password">Forgot password</a> and the studio’s email link resets it.</li>
+      </ul>
+      <p class="hint">
+        Nothing on this website asks for a card or UPI details. If a booking fee is introduced later,
+        the studio will say so at the counter first.
+      </p>
+    </aside>
+  </div>
+</section>
+
+<%- include('../partials/footer') %>

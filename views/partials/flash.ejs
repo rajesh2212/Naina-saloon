@@ -1,0 +1,15 @@
+<% if (hasFlash) { %>
+  <div class="wrap mt-2" aria-live="polite" role="status">
+    <div class="alerts">
+      <% flash.success.forEach(function (message) { %>
+        <p class="alert alert--success"><%= message %></p>
+      <% }) %>
+      <% flash.error.forEach(function (message) { %>
+        <p class="alert alert--error"><%= message %></p>
+      <% }) %>
+      <% flash.info.forEach(function (message) { %>
+        <p class="alert alert--info"><%= message %></p>
+      <% }) %>
+    </div>
+  </div>
+<% } %>

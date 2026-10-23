@@ -1,0 +1,121 @@
+<%- include('../partials/head') %>
+
+<%
+  var adminTabs = [
+    { href: '/admin', label: 'Today' },
+    { href: '/admin/bookings', label: 'Requests' },
+    { href: '/admin/services', label: 'Services' },
+    { href: '/admin/hours', label: 'Hours & settings' },
+  ];
+%>
+
+<section class="section" aria-labelledby="page-title">
+  <div class="wrap">
+    <p class="eyebrow">Salon team</p>
+    <h1 id="page-title">Day sheet</h1>
+    <p class="lede"><%= title %></p>
+
+    <div class="tabs mt-2" role="navigation" aria-label="Staff sections">
+      <% adminTabs.forEach(function (tab) { %>
+        <a href="<%= tab.href %>" aria-current="<%= currentPath === tab.href ? 'true' : 'false' %>"><%= tab.label %></a>
+      <% }) %>
+    </div>
+
+    <div class="picker" role="group" aria-label="Choose a day">
+      <% for (var offset = -3; offset < 11; offset += 1) { %>
+        <% var nearby = dates.addDays(date, offset); %>
+        <a class="picker__item" href="/admin/day/<%= nearby %>" aria-current="<%= nearby === date ? 'true' : 'false' %>">
+          <span><%= nearby %></span>
+        </a>
+      <% } %>
+    </div>
+
+    <% if (!hours) { %>
+      <p class="alert alert--error">No weekday row is configured for this date. Set the week up in <a href="/admin/hours">Hours &amp; settings</a>.</p>
+    <% } else if (closed) { %>
+      <p class="alert alert--info"><strong>The diary is closed for this day.</strong> Nothing can be booked on it. Change it in <a href="/admin/hours">Hours &amp; settings</a>, or open individual times below if rows already exist.</p>
+    <% } else { %>
+      <p class="badge-row">
+        <span class="badge">Opens <%= hours.opensAt %></span>
+        <span class="badge">Till <%= hours.closesAt %></span>
+        <span class="badge badge--muted"><%= rows.length %> slots generated</span>
+      </p>
+    <% } %>
+
+    <div class="table-wrap mt-2">
+      <table>
+        <caption class="sr-only">Every slot on this date, who holds it, and block controls</caption>
+        <thead>
+          <tr>
+            <th scope="col">Time</th><th scope="col">Held by</th><th scope="col">Service</th>
+            <th scope="col">Status</th><th scope="col">Slot control</th>
+          </tr>
+        </thead>
+        <tbody>
+          <% rows.forEach(function (row) { %>
+            <tr>
+              <th scope="row" class="nowrap"><%= row.timeLabel %></th>
+              <td>
+                <% if (row.taken) { %>
+                  <strong><%= row.contact_name %></strong><%= row.preferred_title ? ' (' + row.preferred_title + ')' : '' %><br>
+                  <a href="tel:<%= row.contact_phone %>"><%= row.contact_phone || 'no number' %></a><br>
+                  <span class="small muted"><%= row.user_email %></span>
+                <% } else { %>
+                  <span class="muted">free</span>
+                <% } %>
+              </td>
+              <td>
+                <% if (row.taken) { %>
+                  <%= row.service_name %><br><span class="small muted">till <%= row.endLabel %></span>
+                <% } else { %>—<% } %>
+              </td>
+              <td>
+                <% if (row.taken) { %>
+                  <span class="pill pill--<%= row.booking_status %>"><%= row.booking_status %></span>
+                <% } else if (row.status === 'blocked') { %>
+                  <span class="badge badge--rose">blocked</span>
+                  <span class="small muted"><%= row.block_reason || '' %></span>
+                <% } else { %>
+                  <span class="badge">open</span>
+                <% } %>
+              </td>
+              <td>
+                <% if (row.taken) { %>
+                  <form method="post" action="/admin/bookings/<%= row.booking_id %>/status" class="inline-form">
+                    <%- csrfField() %>
+                    <input type="hidden" name="back" value="/admin/day/<%= date %>">
+                    <button class="btn btn--sm btn--primary" type="submit" name="status" value="confirmed">Confirm</button>
+                    <button class="btn btn--sm btn--danger" type="submit" name="status" value="rejected">Decline</button>
+                  </form>
+                <% } else { %>
+                  <form method="post" action="/admin/day/<%= date %>/slot" class="inline-form">
+                    <%- csrfField() %>
+                    <input type="hidden" name="start_time" value="<%= row.start_time %>">
+                    <% if (row.status === 'blocked') { %>
+                      <button class="btn btn--sm btn--ghost" type="submit" name="action" value="unblock">Open this time</button>
+                    <% } else { %>
+                      <label class="sr-only" for="reason-<%= row.id %>">Reason for blocking <%= row.timeLabel %></label>
+                      <input class="input input--narrow" id="reason-<%= row.id %>" name="reason" type="text"
+                             maxlength="120" placeholder="Why (optional)">
+                      <button class="btn btn--sm btn--danger" type="submit" name="action" value="block">Block</button>
+                    <% } %>
+                  </form>
+                <% } %>
+              </td>
+            </tr>
+          <% }) %>
+          <% if (!rows.length) { %>
+            <tr><td colspan="5">No slots for this date — the day is closed or the date is beyond the booking horizon.</td></tr>
+          <% } %>
+        </tbody>
+      </table>
+    </div>
+
+    <p class="hint mt-1">
+      Blocking hides a time from customers without touching existing bookings. A blocked time cannot be
+      blocked over an active booking — decline or cancel that request first.
+    </p>
+  </div>
+</section>
+
+<%- include('../partials/footer') %>

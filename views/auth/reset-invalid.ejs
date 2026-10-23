@@ -1,0 +1,25 @@
+<%- include('../partials/head') %>
+
+<section class="section" aria-labelledby="page-title">
+  <div class="wrap wrap--narrow">
+    <div class="card card--accent">
+      <p class="eyebrow">Account recovery</p>
+      <h1 id="page-title">That reset link is no longer usable</h1>
+      <p class="lede">
+        A reset link works once and only for an hour. This one has either already been used, has
+        expired, or does not match an open request — so no password has been changed.
+      </p>
+      <div class="form-actions">
+        <a class="btn" href="/auth/forgot-password">Request a new link</a>
+        <a class="btn btn--ghost" href="/auth/login">Sign in instead</a>
+        <a class="btn btn--ghost" href="tel:<%= salon.phoneHref %>">Call <%= salon.phone %></a>
+      </div>
+      <p class="form-note">
+        If you asked for a link a while ago and it never arrived, the studio’s email settings may not be
+        live yet — the phone number is the fastest route.
+      </p>
+    </div>
+  </div>
+</section>
+
+<%- include('../partials/footer') %>

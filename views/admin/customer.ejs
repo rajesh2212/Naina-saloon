@@ -1,0 +1,65 @@
+<%- include('../partials/head') %>
+
+<section class="section" aria-labelledby="page-title">
+  <div class="wrap grid grid--2">
+    <div>
+      <p class="eyebrow">Salon team — private record</p>
+      <h1 id="page-title"><%= customer.name %></h1>
+      <p class="lede">
+        Visible only to the studio team and to this client. Do not share this page or copy details
+        elsewhere.
+      </p>
+
+      <dl class="summary mt-2">
+        <dt>Email</dt><dd><a href="mailto:<%= customer.email %>"><%= customer.email %></a></dd>
+        <dt>Phone</dt><dd><%= customer.phone || 'Not given' %></dd>
+        <dt>Called as</dt><dd><%= customer.preferred_title || 'Not set' %></dd>
+        <dt>Registered</dt><dd><%= dates.formatStamp(customer.created_at) %></dd>
+        <dt>Last sign-in</dt><dd><%= customer.last_login_at ? String(customer.last_login_at).slice(0, 16) : 'Never' %></dd>
+        <dt>Role</dt><dd><%= customer.role %></dd>
+      </dl>
+
+      <% if (customer.notes) { %>
+        <h2 class="card__title mt-2">Standing notes</h2>
+        <p class="card"><%= customer.notes %></p>
+      <% } %>
+
+      <p class="form-actions">
+        <a class="btn btn--ghost" href="/admin/bookings">All requests</a>
+        <a class="btn btn--ghost" href="tel:<%= phone %>">Call the studio</a>
+      </p>
+    </div>
+
+    <div>
+      <h2>Booking history</h2>
+      <% if (!bookings.length) { %>
+        <p class="empty">This account has never booked.</p>
+      <% } else { %>
+        <div class="table-wrap">
+          <table>
+            <caption class="sr-only">Bookings made by this customer</caption>
+            <thead>
+              <tr><th scope="col">#</th><th scope="col">When</th><th scope="col">Service</th><th scope="col">Status</th></tr>
+            </thead>
+            <tbody>
+              <% bookings.forEach(function (booking) { %>
+                <tr>
+                  <th scope="row">#<%= booking.id %></th>
+                  <td><%= booking.dayLabel %><br><span class="small muted"><%= booking.timeLabel %></span></td>
+                  <td><%= booking.service_name %><br><span class="small muted"><%= booking.category_name %></span></td>
+                  <td>
+                    <span class="pill pill--<%= booking.status %>"><%= booking.status %></span>
+                    <% if (booking.note) { %><p class="small mb-0 mt-1">Client: <%= booking.note %></p><% } %>
+                    <% if (booking.staff_note) { %><p class="small mb-0">Studio: <%= booking.staff_note %></p><% } %>
+                  </td>
+                </tr>
+              <% }) %>
+            </tbody>
+          </table>
+        </div>
+      <% } %>
+    </div>
+  </div>
+</section>
+
+<%- include('../partials/footer') %>

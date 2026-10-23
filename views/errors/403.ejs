@@ -1,0 +1,21 @@
+<%- include('../partials/head') %>
+
+<section class="section" aria-labelledby="page-title">
+  <div class="wrap wrap--read center">
+    <p class="eyebrow">Staff area</p>
+    <h1 id="page-title">Salon team only</h1>
+    <p class="lede center-col">
+      <%= message %>
+    </p>
+    <div class="form-actions actions--center">
+      <% if (isAdminSignIn) { %>
+        <a class="btn btn--ghost" href="/account">Back to my bookings</a>
+      <% } else { %>
+        <a class="btn" href="/auth/login">Sign in</a>
+      <% } %>
+      <a class="btn btn--ghost" href="/">Home</a>
+    </div>
+  </div>
+</section>
+
+<%- include('../partials/footer') %>

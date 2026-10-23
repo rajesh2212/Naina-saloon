@@ -1,0 +1,82 @@
+<%- include('../partials/head') %>
+
+<section class="section" aria-labelledby="page-title">
+  <div class="wrap grid grid--2">
+    <div>
+      <p class="eyebrow">Location</p>
+      <h1 id="page-title">Find the studio in Jagannathpur</h1>
+      <p class="lede"><%= salon.name %> — <%= salon.tagline %></p>
+
+      <address class="card card--flat address">
+        <p class="mb-0">
+          <strong>College Road, near Lucky Mess</strong><br>
+          Bagurai, Jagannathpur<br>
+          Bhadrak, Odisha 756100<br>
+          India
+        </p>
+      </address>
+
+      <ul class="info-list mt-2">
+        <li>
+          <span class="marker" aria-hidden="true">☎</span>
+          <p><strong><a href="tel:<%= salon.phoneHref %>"><%= salon.phone %></a></strong><br>
+          <span class="small muted">Call for same-day times, group bookings and wedding enquiries.</span></p>
+        </li>
+        <li>
+          <span class="marker" aria-hidden="true">⌚</span>
+          <p><strong>Opens at <%= salon.opensAtLabel %></strong><br>
+          <span class="small muted">The rest of the day’s timings are set in the studio diary — the booking page only shows what is open.</span></p>
+        </li>
+        <li>
+          <span class="marker" aria-hidden="true">➜</span>
+          <p><strong><a href="<%= salon.mapsUrl %>" rel="noopener noreferrer" target="_blank">Directions on Google Maps</a></strong><br>
+          <span class="small muted">Landmark: Lucky Mess, on College Road in Bagurai.</span></p>
+        </li>
+      </ul>
+
+      <div class="form-actions">
+        <a class="btn" href="/book">Book an appointment</a>
+        <a class="btn btn--ghost" href="/services">Services</a>
+      </div>
+    </div>
+
+    <div class="stack">
+      <div class="card card--accent">
+        <h2 class="card__title">Days the diary is open</h2>
+        <table class="hours-table">
+          <caption class="sr-only">Days currently open for booking</caption>
+          <thead><tr><th scope="col">Day</th><th scope="col">Opens</th><th scope="col">Runs till</th></tr></thead>
+          <tbody>
+            <% week.forEach(function (day) { %>
+              <tr>
+                <th scope="row"><%= day.label %></th>
+                <td><%= day.is_closed ? 'Closed' : day.opensLabel %></td>
+                <td><%= day.is_closed ? '—' : day.closesLabel %></td>
+              </tr>
+            <% }) %>
+          </tbody>
+        </table>
+        <p class="hint">
+          Set by the studio and adjustable at any time. Festival and wedding season changes are posted
+          here first.
+        </p>
+      </div>
+
+      <div class="card card--flat">
+        <h2 class="card__title">Next days you can book</h2>
+        <ul class="info-list">
+          <% nextOpenDays.forEach(function (entry) { %>
+            <li>
+              <span class="marker" aria-hidden="true">✓</span>
+              <p><strong><%= entry.label %></strong><br>
+              <span class="small muted">Opens <%= entry.hours.opensAt %> — <a href="/book">see free times</a></span></p>
+            </li>
+          <% }) %>
+        </ul>
+        <p class="hint">Today is <%= today %>.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<%- include('../partials/footer') %>

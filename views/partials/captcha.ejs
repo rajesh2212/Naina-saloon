@@ -1,0 +1,50 @@
+<%#
+  Server-verified CAPTCHA. Uses Cloudflare Turnstile when the keys are
+  configured; otherwise this app's own image challenge. Either way the answer
+  is checked on the server, never in the browser.
+%>
+<%
+  var provider = (site && site.captcha && site.captcha.provider) || 'local-image';
+  var error = (typeof errors !== 'undefined' && errors && errors.captcha) || null;
+%>
+<fieldset class="field">
+  <legend class="field-label">Human check</legend>
+
+  <% if (provider === 'turnstile') { %>
+    <div class="captcha-box">
+      <div class="cf-turnstile"
+           data-sitekey="<%= site.captcha.siteKey %>"
+           data-theme="light"></div>
+      <script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script>
+    </div>
+    <p class="hint">Protected by Cloudflare Turnstile. The token is verified by the studio’s server.</p>
+  <% } else { %>
+    <div class="captcha-box">
+      <img class="captcha-box__img"
+           src="/captcha.svg?t=<%= (typeof captchaNext !== 'undefined' ? captchaNext : Date.now()) %>"
+           width="190" height="64"
+           role="img"
+           alt="Verification image with five characters to copy into the box beside it"
+           data-captcha-image>
+      <div class="captcha-box__side">
+        <label class="field-label" for="captcha_answer">Type the characters in the image</label>
+        <input class="input" id="captcha_answer" name="captcha_answer" type="text"
+               autocomplete="off" autocapitalize="off" spellcheck="false" inputmode="text"
+               maxlength="10" required
+               <% if (error) { %>aria-invalid="true" aria-describedby="captcha-error"<% } %>
+               data-captcha-answer>
+        <button class="btn btn--ghost btn--sm" type="button" data-captcha-refresh>New image</button>
+      </div>
+    </div>
+    <p class="hint" data-captcha-status>Checked on the studio’s server, not in your browser.</p>
+  <% } %>
+
+  <% if (error) { %>
+    <p class="error" id="captcha-error" role="alert"><%= error %></p>
+  <% } %>
+
+  <p class="hint">
+    Cannot use the check? Call the studio on
+    <a href="tel:<%= salon.phoneHref %>"><%= salon.phone %></a> and the team will book you in over the phone.
+  </p>
+</fieldset>

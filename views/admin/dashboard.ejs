@@ -1,0 +1,133 @@
+<%- include('../partials/head') %>
+
+<%
+  var adminTabs = [
+    { href: '/admin', label: 'Today' },
+    { href: '/admin/bookings', label: 'Requests' },
+    { href: '/admin/services', label: 'Services' },
+    { href: '/admin/hours', label: 'Hours & settings' },
+  ];
+%>
+
+<section class="section" aria-labelledby="page-title">
+  <div class="wrap">
+    <p class="eyebrow">Salon team</p>
+    <h1 id="page-title">Staff dashboard</h1>
+    <p class="lede">Signed in as <%= currentUser.name %> (<%= currentUser.email %>). Customer details here are private to the studio.</p>
+
+    <div class="tabs mt-2" role="navigation" aria-label="Staff sections">
+      <% adminTabs.forEach(function (tab) { %>
+        <a href="<%= tab.href %>" aria-current="<%= currentPath === tab.href ? 'true' : 'false' %>"><%= tab.label %></a>
+      <% }) %>
+      <a href="/admin/day/<%= day %>">Day sheet</a>
+    </div>
+
+    <div class="stat-grid">
+      <div class="stat"><strong><%= counts.pending %></strong><span>requests waiting for confirmation</span></div>
+      <div class="stat"><strong><%= counts.confirmedUpcoming %></strong><span>confirmed upcoming slots</span></div>
+      <div class="stat"><strong><%= counts.customers %></strong><span>registered customers</span></div>
+      <div class="stat"><strong><%= counts.requestsTotal %></strong><span>booking requests all time</span></div>
+    </div>
+  </div>
+</section>
+
+<section class="section section--panel" aria-labelledby="queue-title">
+  <div class="wrap">
+    <h2 id="queue-title">Waiting for confirmation</h2>
+    <% if (!pending.length) { %>
+      <p class="empty">Nothing waiting. New requests appear here the moment a customer sends one.</p>
+    <% } else { %>
+      <div class="table-wrap">
+        <table>
+          <caption class="sr-only">Pending booking requests</caption>
+          <thead>
+            <tr>
+              <th scope="col">#</th><th scope="col">When</th><th scope="col">Service</th>
+              <th scope="col">Client</th><th scope="col">Note</th><th scope="col">Decision</th>
+            </tr>
+          </thead>
+          <tbody>
+            <% pending.forEach(function (booking) { %>
+              <tr>
+                <th scope="row">#<%= booking.id %></th>
+                <td>
+                  <%= booking.dayLabel %><br>
+                  <span class="small muted"><%= booking.timeLabel %></span>
+                  <% if (booking.isToday) { %><span class="badge badge--rose">today</span><% } %>
+                  <% if (booking.isPast) { %><span class="badge badge--muted">past</span><% } %>
+                </td>
+                <td><%= booking.service_name %><br><span class="small muted"><%= booking.category_name %></span></td>
+                <td>
+                  <strong><%= booking.contact_name %></strong><%= booking.preferred_title ? ' (' + booking.preferred_title + ')' : '' %><br>
+                  <a href="tel:<%= booking.contact_phone %>"><%= booking.contact_phone || 'no number' %></a><br>
+                  <span class="small muted"><%= booking.user_email %></span><br>
+                  <a class="small" href="/admin/customers/<%= booking.user_id %>">client file</a>
+                </td>
+                <td class="small"><%= booking.note || '—' %></td>
+                <td>
+                  <form method="post" action="/admin/bookings/<%= booking.id %>/status">
+                    <%- csrfField() %>
+                    <input type="hidden" name="back" value="/admin">
+                    <label class="sr-only" for="note-<%= booking.id %>">Studio note for #<%= booking.id %></label>
+                    <input class="input" id="note-<%= booking.id %>" name="staff_note" type="text"
+                           maxlength="200" placeholder="Note (optional)">
+                    <button class="btn btn--sm btn--primary" type="submit" name="status" value="confirmed">Confirm</button>
+                    <button class="btn btn--sm btn--danger" type="submit" name="status" value="rejected">Decline</button>
+                  </form>
+                </td>
+              </tr>
+            <% }) %>
+          </tbody>
+        </table>
+      </div>
+    <% } %>
+  </div>
+</section>
+
+<section class="section" aria-labelledby="today-title">
+  <div class="wrap grid grid--2">
+    <div>
+      <h2 id="today-title">Today — <%= day %></h2>
+      <% if (!dayBookings.length) { %>
+        <p class="empty">No bookings recorded for today yet.</p>
+      <% } else { %>
+        <ul class="info-list">
+          <% dayBookings.forEach(function (booking) { %>
+            <li>
+              <span class="marker" aria-hidden="true"><%= booking.start_time.slice(0, 2) %></span>
+              <p>
+                <strong><%= booking.timeLabel %></strong> — <%= booking.service_name %><br>
+                <%= booking.contact_name %> · <a href="tel:<%= booking.contact_phone %>"><%= booking.contact_phone || '—' %></a>
+                <span class="pill pill--<%= booking.status %>"><%= booking.status %></span>
+              </p>
+            </li>
+          <% }) %>
+        </ul>
+      <% } %>
+      <p class="form-actions"><a class="btn btn--ghost btn--sm" href="/admin/day/<%= day %>">Open the full day sheet</a></p>
+    </div>
+
+    <div class="card card--flat">
+      <h2 id="confirmed-title" class="card__title">Confirmed and coming up</h2>
+      <% if (!confirmed.length) { %>
+        <p class="empty">No confirmed appointments in the diary yet.</p>
+      <% } else { %>
+        <ul class="small">
+          <% confirmed.slice(0, 12).forEach(function (booking) { %>
+            <li>
+              <strong><%= booking.dayLabel %></strong> <%= booking.timeLabel %> —
+              <%= booking.service_name %>, <%= booking.contact_name %>
+              <form method="post" action="/admin/bookings/<%= booking.id %>/status" class="inline-form">
+                <%- csrfField() %>
+                <input type="hidden" name="back" value="/admin">
+                <button class="btn btn--sm btn--danger" type="submit" name="status" value="cancelled">Cancel</button>
+              </form>
+            </li>
+          <% }) %>
+        </ul>
+      <% } %>
+    </div>
+  </div>
+</section>
+
+<%- include('../partials/footer') %>

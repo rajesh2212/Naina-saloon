@@ -1,0 +1,41 @@
+<%- include('../partials/head') %>
+
+<section class="section" aria-labelledby="page-title">
+  <div class="wrap">
+    <p class="eyebrow"><a href="/services">Service groups</a></p>
+    <h1 id="page-title"><%= category.name %></h1>
+    <p class="lede"><%= category.summary %></p>
+
+    <% if (!category.services.length) { %>
+      <p class="empty">No services are listed in this group right now. Call the studio on <%= salon.phone %> and describe what you need.</p>
+    <% } else { %>
+      <div class="grid grid--2 mt-3">
+        <% category.services.forEach(function (service) { %>
+          <article class="card service-card">
+            <h2 class="card__title"><%= service.name %></h2>
+            <% if (service.description) { %><p><%= service.description %></p><% } %>
+            <p class="badge-row">
+              <span class="badge"><%= service.duration_minutes %> minutes</span>
+              <span class="badge badge--rose"><%= service.price_text || 'Price at the studio' %></span>
+            </p>
+            <p class="form-actions">
+              <% if (service.is_bookable) { %>
+                <a class="btn btn--sm" href="/book?service=<%= service.id %>">Check free times</a>
+              <% } else { %>
+                <a class="btn btn--sm btn--ghost" href="tel:<%= salon.phoneHref %>">Ask the studio</a>
+              <% } %>
+            </p>
+          </article>
+        <% }) %>
+      </div>
+    <% } %>
+
+    <hr class="rule">
+    <p class="form-actions">
+      <a class="btn btn--ghost" href="/services">All service groups</a>
+      <a class="btn btn--ghost" href="/how-to-book">How booking works</a>
+    </p>
+  </div>
+</section>
+
+<%- include('../partials/footer') %>

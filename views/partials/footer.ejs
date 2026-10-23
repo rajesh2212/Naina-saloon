@@ -1,0 +1,57 @@
+    </main>
+
+    <footer class="site-footer">
+      <div class="wrap">
+        <div class="site-footer__grid">
+          <div>
+            <h2 class="site-footer__lead">Book a time at the studio.</h2>
+            <p><a class="btn btn-arrow" href="/book">Book an appointment <span class="chip" aria-hidden="true">&rarr;</span></a></p>
+            <p class="small">Or call <a href="tel:<%= salon.phoneHref %>"><%= salon.phone %></a> and we will fix a time over the phone.</p>
+          </div>
+
+          <div>
+            <h3>Services</h3>
+            <ul>
+              <li><a href="/services">All services</a></li>
+              <li><a href="/services#bridal-and-occasion-makeup">Bridal &amp; occasion makeup</a></li>
+              <li><a href="/services#hair-styling-and-coloring">Hair styling &amp; colouring</a></li>
+              <li><a href="/services#facials-and-skincare">Facials &amp; skincare</a></li>
+              <li><a href="/services#eyelid-and-eyebrow">Eyelid &amp; eyebrow</a></li>
+            </ul>
+          </div>
+
+          <div>
+            <h3>The studio</h3>
+            <ul>
+              <li><a href="/studio">About Naina Beauty Parlour</a></li>
+              <li><a href="/how-to-book">How booking works</a></li>
+              <li><a href="/location">Find us &amp; directions</a></li>
+              <li><a href="/#faq">Questions we get asked</a></li>
+              <% if (currentUser) { %><li><a href="/account">My account</a></li><% } else { %><li><a href="/auth/login">Sign in</a></li><% } %>
+            </ul>
+          </div>
+
+          <div>
+            <h3>Visit</h3>
+            <p class="address">
+              <%= salon.address %><br>
+              <a href="tel:<%= salon.phoneHref %>"><%= salon.phone %></a><br>
+              <a href="<%= salon.mapsUrl %>" rel="noopener noreferrer" target="_blank">Directions on Google Maps</a>
+            </p>
+            <div class="site-footer__hours">
+              <span>Opens at <%= salon.opensAtLabel %>.</span>
+              <span>The studio closes at a different time each day &mdash; the diary only offers hours the team has actually opened.</span>
+            </div>
+          </div>
+        </div>
+
+        <p class="site-footer__word" aria-hidden="true">NAINA</p>
+
+        <div class="site-footer__legal">
+          <span>&copy; <%= new Date().getFullYear() %> <%= salon.name %>, <%= salon.tagline %> &middot; Bagurai, Jagannathpur, Bhadrak, Odisha 756100</span>
+          <span>All are welcome &mdash; the studio books any client for any service.</span>
+        </div>
+      </div>
+    </footer>
+  </body>
+</html>

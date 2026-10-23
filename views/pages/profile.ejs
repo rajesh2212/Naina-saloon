@@ -1,0 +1,126 @@
+<%- include('../partials/head') %>
+
+<%
+  var errs = locals.errors || {};
+  var vals = locals.values || {};
+  var user = locals.user || currentUser;
+  var showPasswordErrors = Boolean(errs.password || errs.current || errs.confirm || errs.captcha);
+%>
+
+<section class="section" aria-labelledby="page-title">
+  <div class="wrap wrap--narrow">
+    <p class="eyebrow">Account</p>
+    <h1 id="page-title">My details</h1>
+    <p class="lede">
+      These are the details the studio sees when you book. Nothing here asks for your gender, and no
+      payment information is collected.
+    </p>
+  </div>
+</section>
+
+<section class="section section--panel" aria-labelledby="details-title">
+  <div class="wrap wrap--narrow">
+    <h2 id="details-title">Contact details</h2>
+    <form method="post" action="/account/profile" class="mt-1">
+      <%- csrfField() %>
+
+      <div class="field">
+        <label for="name">Name</label>
+        <input class="input" id="name" name="name" type="text" autocomplete="name" required maxlength="80"
+               value="<%= vals.name %>"
+               aria-describedby="name-hint<%= errs.name ? ' name-error' : '' %>"
+               <% if (errs.name) { %>aria-invalid="true"<% } %>>
+        <% if (errs.name) { %><p class="error" id="name-error"><%= errs.name %></p><% } %>
+        <p class="hint" id="name-hint">How the studio greets you and writes the diary entry.</p>
+      </div>
+
+      <div class="field">
+        <label for="email">Email</label>
+        <input class="input" id="email" type="email" value="<%= user.email %>" disabled aria-describedby="email-hint">
+        <p class="hint" id="email-hint">
+          Your sign-in address cannot be edited here — it is tied to the reset links. <a href="/auth/register">Register a new account</a>
+          if you have moved to a different address.
+        </p>
+      </div>
+
+      <div class="field">
+        <label for="phone">Mobile number</label>
+        <input class="input" id="phone" name="phone" type="tel" inputmode="tel" autocomplete="tel"
+               maxlength="20" value="<%= vals.phone %>"
+               <% if (errs.phone) { %>aria-invalid="true" aria-describedby="phone-error"<% } %>>
+        <% if (errs.phone) { %><p class="error" id="phone-error"><%= errs.phone %></p><% } %>
+        <p class="hint">Pre-filled on each booking so the counter can reach you.</p>
+      </div>
+
+      <div class="field">
+        <label for="preferred_title">Called as <span class="optional">(optional)</span></label>
+        <input class="input" id="preferred_title" name="preferred_title" type="text" maxlength="24"
+               autocomplete="nickname" placeholder="Ms., Mr., Mx., or leave blank" value="<%= vals.preferredTitle %>">
+      </div>
+
+      <div class="field">
+        <label for="notes">Standing notes for the studio <span class="optional">(optional)</span></label>
+        <textarea class="textarea" id="notes" name="notes" rows="3" maxlength="500"><%= vals.notes %></textarea>
+        <p class="hint">Anything useful every time — hair length, shade you use, which family you usually book with.</p>
+      </div>
+
+      <div class="form-actions">
+        <button class="btn btn--primary" type="submit">Save details</button>
+        <a class="btn btn--ghost" href="/account">Back to my bookings</a>
+      </div>
+    </form>
+  </div>
+</section>
+
+<section class="section" aria-labelledby="password-title">
+  <div class="wrap wrap--narrow">
+    <h2 id="password-title">Change password</h2>
+    <p class="muted">
+      Passwords are stored only as bcrypt hashes. Signing out is not needed after changing it, but other
+      devices will have to sign in again.
+    </p>
+
+    <% if (errs.form) { %><p class="alert alert--error" role="alert"><%= errs.form %></p><% } %>
+
+    <form method="post" action="/account/password" class="mt-1">
+      <%- csrfField() %>
+
+      <div class="field">
+        <label for="current_password">Current password</label>
+        <input class="input" id="current_password" name="current_password" type="password"
+               autocomplete="current-password" required
+               <% if (errs.current) { %>aria-invalid="true" aria-describedby="current-error"<% } %>>
+        <% if (errs.current) { %><p class="error" id="current-error"><%= errs.current %></p><% } %>
+      </div>
+
+      <div class="field">
+        <label for="password">New password</label>
+        <input class="input" id="password" name="password" type="password" autocomplete="new-password"
+               required minlength="10"
+               aria-describedby="password-hint<%= errs.password ? ' password-error' : '' %>"
+               <% if (errs.password) { %>aria-invalid="true"<% } %>>
+        <% if (errs.password) { %><p class="error" id="password-error"><%= errs.password %></p><% } %>
+        <p class="hint" id="password-hint">At least 10 characters, with a letter and a number.</p>
+      </div>
+
+      <div class="field">
+        <label for="confirm_password">Repeat the new password</label>
+        <input class="input" id="confirm_password" name="confirm_password" type="password"
+               autocomplete="new-password" required
+               <% if (errs.confirm) { %>aria-invalid="true" aria-describedby="confirm-error"<% } %>>
+        <% if (errs.confirm) { %><p class="error" id="confirm-error"><%= errs.confirm %></p><% } %>
+      </div>
+
+      <%- include('../partials/captcha') %>
+
+      <div class="form-actions">
+        <button class="btn" type="submit">Update password</button>
+      </div>
+      <% if (showPasswordErrors && !site.captcha.turnstileConfigured) { %>
+        <p class="form-note">A fresh verification image was loaded — type the new characters.</p>
+      <% } %>
+    </form>
+  </div>
+</section>
+
+<%- include('../partials/footer') %>

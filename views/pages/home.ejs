@@ -1,0 +1,399 @@
+<%- include('../partials/head') %>
+
+<%
+/* Featured groups get a full image card; the rest are listed underneath. */
+var featuredSlugs = ['bridal-and-occasion-makeup', 'hair-styling-and-coloring', 'facials-and-skincare', 'eyelid-and-eyebrow', 'hair-treatments'];
+var featured = [];
+var others = [];
+categories.forEach(function (category) {
+  var position = featuredSlugs.indexOf(category.slug);
+  if (position === -1) { others.push(category); return; }
+  featured.push({ category: category, photo: site.photos.services[position] });
+});
+featured.sort(function (a, b) { return featuredSlugs.indexOf(a.category.slug) - featuredSlugs.indexOf(b.category.slug); });
+
+function span(range) {
+  var minutes = range.map(function (service) { return service.duration_minutes; });
+  var low = Math.min.apply(null, minutes);
+  var high = Math.max.apply(null, minutes);
+  return low === high ? low + ' min' : low + '–' + high + ' min';
+}
+%>
+
+<section class="hero" aria-labelledby="hero-title">
+  <p class="hero__word" aria-hidden="true">NAINA</p>
+
+  <div class="wrap hero__inner">
+    <div class="hero__copy">
+      <p class="eyebrow-pill"><span class="eyebrow-pill__star" aria-hidden="true">&#10022;</span> Jagannathpur, Bhadrak &middot; since <%= salon.since %></p>
+      <h1 id="hero-title">Bridal looks, hair and skin care at Naina Beauty Parlour</h1>
+      <p class="hero__lede">
+        <%= salon.tagline %> on College Road, Bagurai. Choose a service, pick a free time the studio
+        has actually opened in the diary, and send the request in under a minute.
+      </p>
+      <div class="hero__actions">
+        <a class="btn btn-arrow" href="/book">Book an Appointment <span class="chip" aria-hidden="true">&rarr;</span></a>
+        <a class="btn btn--ghost" href="/services">See the services</a>
+      </div>
+      <p class="hero__note">
+        Requests go straight to the studio team, who confirm the time. Nothing is charged on this
+        website. For a same-day time, call <a href="tel:<%= salon.phoneHref %>"><%= salon.phone %></a>.
+      </p>
+    </div>
+
+    <div class="hero__media">
+      <%- include('../partials/photo', {
+        photo: site.photos.hero[0],
+        ratio: '45',
+        eager: true,
+        label: 'At the chair',
+        alt: 'a bridal beauty portrait, standing in for the studio’s own photograph.'
+      }) %>
+      <p class="hero__badge">
+        <strong>Opens at <%= salon.opensAtLabel %></strong>
+        The diary below shows only the hours the team has opened.
+      </p>
+    </div>
+  </div>
+
+  <div class="wrap hero__stats">
+    <div class="stat-card">
+      <strong><%= stats.categories %></strong>
+      <span>service groups, from bridal makeup to brow work</span>
+      <em>Every group on this page is bookable on its own.</em>
+    </div>
+    <div class="stat-card">
+      <strong><%= stats.bookable %></strong>
+      <span>services the studio lists today</span>
+      <em>The team adds, renames and retires entries as the counter changes.</em>
+    </div>
+    <div class="stat-card">
+      <strong><%= openTimes %></strong>
+      <span>free times open in the diary for the next two weeks</span>
+      <em>A live count from the booking database, not a sample figure.</em>
+    </div>
+  </div>
+</section>
+
+<section class="section" id="about" aria-labelledby="about-title">
+  <div class="wrap split">
+    <div>
+      <p class="eyebrow-pill"><span class="eyebrow-pill__star" aria-hidden="true">&#10022;</span> About the salon</p>
+      <h2 id="about-title" class="statement">
+        A neighbourhood salon on College Road that has dressed brides, fixed brows and washed hair
+        for Jagannathpur families since <%= salon.since %>.
+      </h2>
+      <p class="lede">
+        Wedding mornings, function nights, a quick threading session between college and home. The
+        services are grouped the way the studio actually works, and the team updates the list, the
+        chair times and the diary as they change.
+      </p>
+      <p class="form-actions">
+        <a class="btn btn-arrow" href="/studio">More about us <span class="chip" aria-hidden="true">&rarr;</span></a>
+      </p>
+    </div>
+    <div class="media-cluster">
+      <%- include('../partials/photo', { photo: site.photos.about[0], ratio: '34', label: 'At the chair', alt: 'a stylist working on a seated client’s hair at the chair.' }) %>
+      <%- include('../partials/photo', { photo: site.photos.about[1], ratio: '11', label: 'Bridal counter', alt: 'a bridal makeup counter with brushes, mirrors and jewellery.' }) %>
+      <div class="fact-card">
+        <div class="fact-card__row">
+          <div><strong>Since <%= salon.since %></strong><span>Serving Bagurai and Jagannathpur</span></div>
+          <div><strong><%= salon.opensAtLabel %></strong><span>The studio opens at</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="section section--alt" id="your-visit" aria-labelledby="visit-title">
+  <div class="wrap">
+    <div class="sec-head">
+      <p class="eyebrow-pill"><span class="eyebrow-pill__star" aria-hidden="true">&#10022;</span> Your visit</p>
+      <h2 id="visit-title">Four steps from the first look to a confirmed chair</h2>
+      <p class="lede">Availability, requests and confirmations all come from the studio’s own booking database.</p>
+    </div>
+
+    <div class="checker">
+      <div class="checker__cell">
+        <p class="checker__num">Step 01</p>
+        <h3>Choose a service</h3>
+        <p>Pick from the catalogue. Each entry shows how long the chair is held for.</p>
+      </div>
+      <div class="checker__media">
+        <%- include('../partials/photo', { photo: site.photos.visit[0], ratio: '43', label: 'Choosing a service', alt: 'a client at the counter talking through options with the stylist.' }) %>
+      </div>
+      <div class="checker__media">
+        <%- include('../partials/photo', { photo: site.photos.visit[1], ratio: '43', label: 'Picking a date', alt: 'a hand resting on the studio’s closed appointment diary.' }) %>
+      </div>
+      <div class="checker__cell">
+        <p class="checker__num">Step 02</p>
+        <h3>Pick a day</h3>
+        <p>You only see days the studio has opened, and days that still have room for that service.</p>
+      </div>
+      <div class="checker__cell">
+        <p class="checker__num">Step 03</p>
+        <h3>Take a free time</h3>
+        <p>Slots come from the live diary. Once a time is requested it disappears from everyone else’s list.</p>
+      </div>
+      <div class="checker__media">
+        <%- include('../partials/photo', { photo: site.photos.visit[2], ratio: '43', label: 'Leaving your details', alt: 'a client writing her name and number on a card at the counter.' }) %>
+      </div>
+      <div class="checker__media">
+        <%- include('../partials/photo', { photo: site.photos.visit[3], ratio: '43', label: 'Confirmed', alt: 'a client settled in the chair, ready to begin.' }) %>
+      </div>
+      <div class="checker__cell">
+        <p class="checker__num">Step 04</p>
+        <h3>Watch for the confirmation</h3>
+        <p>Requests start as <span class="pill pill--pending">Pending</span> and move to <span class="pill pill--confirmed">Confirmed</span> — follow it from your account.</p>
+      </div>
+    </div>
+
+    <p class="form-actions actions--center mt-3">
+      <a class="btn" href="/book">Start a booking</a>
+      <a class="btn btn--ghost" href="/how-to-book">Read the full walkthrough</a>
+    </p>
+  </div>
+</section>
+
+<section class="section" id="services" aria-labelledby="services-title">
+  <div class="wrap">
+    <div class="sec-head">
+      <p class="eyebrow-pill"><span class="eyebrow-pill__star" aria-hidden="true">&#10022;</span> Services</p>
+      <h2 id="services-title">What the studio works on</h2>
+      <p class="lede">Five groups the studio is known for, with the rest of the diary underneath. Open a group for the full list.</p>
+    </div>
+
+    <div class="exp-list">
+      <% featured.forEach(function (entry) { var category = entry.category; %>
+        <article class="exp-card">
+          <div class="exp-card__media">
+            <%- include('../partials/photo', { photo: entry.photo, ratio: '43', label: category.name, alt: 'a client having ' + category.name.toLowerCase() + ' in a beauty parlour.' }) %>
+          </div>
+          <div class="exp-card__body">
+            <p class="checker__num"><%= category.services.length %> listed service<%= category.services.length === 1 ? '' : 's' %></p>
+            <h3><a href="/services/<%= category.slug %>"><%= category.name %></a></h3>
+            <p><%= category.summary %></p>
+            <ul class="feature-list">
+              <% category.services.slice(0, 4).forEach(function (service) { %>
+                <li><%= service.name %></li>
+              <% }) %>
+            </ul>
+            <p class="small muted"><% if (category.services.length) { %>Chair time runs <%= span(category.services) %> depending on the service.<% } else { %>Ask the counter what this group currently covers.<% } %></p>
+            <p class="mb-0">
+              <a class="btn btn-arrow btn--sm" href="/services/<%= category.slug %>">Open this group <span class="chip" aria-hidden="true">&rarr;</span></a>
+              <a class="btn btn--ghost btn--sm" href="/book?service=<%= category.services[0] ? category.services[0].id : '' %>">Book it</a>
+            </p>
+          </div>
+        </article>
+      <% }) %>
+    </div>
+
+    <% if (others.length) { %>
+      <h3 class="mt-3">Also in the diary</h3>
+      <div class="grid grid--3">
+        <% others.forEach(function (category) { %>
+          <article class="card service-card">
+            <h4 class="card__title"><a href="/services/<%= category.slug %>"><%= category.name %></a></h4>
+            <p class="card__meta"><%= category.summary %></p>
+            <p class="badge-row">
+              <span class="badge"><%= category.services.length %> service<%= category.services.length === 1 ? '' : 's' %></span>
+              <% if (category.services.length) { %><span class="badge badge--muted"><%= span(category.services) %></span><% } %>
+            </p>
+          </article>
+        <% }) %>
+      </div>
+    <% } %>
+  </div>
+</section>
+
+<section class="section section--blush" id="pricing" aria-labelledby="pricing-title">
+  <div class="wrap">
+    <div class="sec-head sec-head--split">
+      <p class="eyebrow-pill"><span class="eyebrow-pill__star" aria-hidden="true">&#10022;</span> Pricing</p>
+      <h2 id="pricing-title">What a visit costs</h2>
+    </div>
+
+    <p class="lede">
+      The studio has not published a price list, so this page does not invent one. What you see here
+      is the chair time each group holds. The counter tells you the amount when you book, and the
+      team can quote it over the phone on <%= salon.phone %>.
+    </p>
+
+    <ol class="price-list mt-3">
+      <% categories.forEach(function (category, index) { %>
+        <li>
+          <div class="price-row">
+            <span class="price-row__num">(<%= index < 9 ? '0' : '' %><%= index + 1 %>)</span>
+            <span class="price-row__name"><%= category.name %></span>
+            <span class="price-row__val"><a href="/services/<%= category.slug %>">Contact us for pricing</a></span>
+            <span class="price-row__desc">
+              <%= category.services.length %> service<%= category.services.length === 1 ? '' : 's' %><% if (category.services.length) { %> &middot; <%= span(category.services) %> in the chair<% } %>
+            </span>
+          </div>
+        </li>
+      <% }) %>
+    </ol>
+
+    <p class="form-actions mt-3">
+      <a class="btn" href="/book">Check free times</a>
+      <a class="btn btn--ghost" href="tel:<%= salon.phoneHref %>">Call for a quote</a>
+    </p>
+    <p class="form-note">Nothing is charged on this website. There is no payment screen and no booking fee.</p>
+  </div>
+</section>
+
+<section class="section" id="faq" aria-labelledby="faq-title">
+  <div class="wrap split">
+    <div>
+      <div class="checker__media">
+        <%- include('../partials/photo', { photo: site.photos.gallery[0], ratio: '43', label: 'At the counter', alt: 'a stylist at the parlour counter greeting a client.' }) %>
+      </div>
+      <h2 id="faq-title" class="mt-2">Do you have<br>any questions?</h2>
+      <p class="form-actions">
+        <a class="btn btn-arrow" href="tel:<%= salon.phoneHref %>">Call the studio <span class="chip" aria-hidden="true">&rarr;</span></a>
+      </p>
+    </div>
+
+    <div>
+      <p class="eyebrow-pill"><span class="eyebrow-pill__star" aria-hidden="true">&#10022;</span> Frequently asked</p>
+      <div class="faq">
+        <details class="faq__item" open>
+          <summary>How do I book an appointment?<span class="faq__mark" aria-hidden="true"></span></summary>
+          <div class="faq__body">Open <a href="/book">Book an appointment</a>, choose the service, then a day and a
+            time the diary is showing as free. Leave a name and a phone number the studio can reach, and send
+            the request. The team confirms it from the counter.</div>
+        </details>
+        <details class="faq__item">
+          <summary>Do I pay anything on this website?<span class="faq__mark" aria-hidden="true"></span></summary>
+          <div class="faq__body">No. There is no payment screen, no card form and no booking fee here. Anything
+            owed is settled at the studio, in the way the counter prefers.</div>
+        </details>
+        <details class="faq__item">
+          <summary>How will I know my time is confirmed?<span class="faq__mark" aria-hidden="true"></span></summary>
+          <div class="faq__body">Every request starts as <em>pending</em>. When the studio accepts it, it becomes
+            <em>confirmed</em>. You can see both states, with the date and time, in your account under
+            <a href="/account">My bookings</a>.</div>
+        </details>
+        <details class="faq__item">
+          <summary>Can I cancel or move a booking?<span class="faq__mark" aria-hidden="true"></span></summary>
+          <div class="faq__body">You can cancel an open booking yourself from your account, which frees the time
+            for other clients straight away. Moving it to another slot is a phone call to
+            <a href="tel:<%= salon.phoneHref %>"><%= salon.phone %></a> — the studio would rather hold your place
+            than lose it.</div>
+        </details>
+        <details class="faq__item">
+          <summary>Do I need an account to look at the diary?<span class="faq__mark" aria-hidden="true"></span></summary>
+          <div class="faq__body">No. Anyone can browse services and see which times are free. Sending a request
+            needs a free account, so there is somewhere private to keep your bookings and cancel one later.</div>
+        </details>
+        <details class="faq__item">
+          <summary>Do I have to say whether I am male or female to book?<span class="faq__mark" aria-hidden="true"></span></summary>
+          <div class="faq__body">No. The booking form asks for a name, a phone number and the service — nothing
+            else. The title field is optional and takes whatever you want to be called. LGBTQ+ clients are
+            welcome for any service, including bridal and function work.</div>
+        </details>
+        <details class="faq__item">
+          <summary>What are your opening hours?<span class="faq__mark" aria-hidden="true"></span></summary>
+          <div class="faq__body">The studio opens at <%= salon.opensAtLabel %>. Closing time changes day to day, so
+            instead of guessing, the diary only offers the hours the team has actually opened. If the day you
+            want is not showing times, call <%= salon.phone %>.</div>
+        </details>
+        <details class="faq__item">
+          <summary>Can you tell me a price before I come in?<span class="faq__mark" aria-hidden="true"></span></summary>
+          <div class="faq__body">Yes — over the phone or at the counter. Prices depend on the service and how long
+            the work takes, and the studio has not published a fixed list, so this website deliberately shows
+            chair times instead of made-up amounts.</div>
+        </details>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="section section--alt" id="gallery" aria-labelledby="gallery-title">
+  <div class="wrap">
+    <div class="sec-head">
+      <p class="eyebrow-pill"><span class="eyebrow-pill__star" aria-hidden="true">&#10022;</span> Gallery</p>
+      <h2 id="gallery-title">What the work looks like</h2>
+      <p class="lede">Every picture on this page is an <strong>illustrative</strong> image, tagged as such in the
+        corner — it is not a photograph of this studio or of a client’s result. The team’s own photographs of the
+        counter, the chair and the bridal work will replace them one slot at a time, with nothing else to change.</p>
+    </div>
+
+    <div class="gallery">
+      <%- include('../partials/photo', { photo: site.photos.gallery[1], ratio: '43', label: 'The storefront', alt: 'a neighbourhood beauty parlour frontage with marigold garlands.' }) %>
+      <%- include('../partials/photo', { photo: site.photos.gallery[2], ratio: '43', label: 'Bridal makeup', alt: 'bridal embroidery, gold jewellery and jasmine in dark hair.' }) %>
+      <%- include('../partials/photo', { photo: site.photos.gallery[3], ratio: '43', label: 'Hair styling', alt: 'a finished braid wound into a low chignon with a jasmine string.' }) %>
+      <%- include('../partials/photo', { photo: site.photos.gallery[4], ratio: '32', label: 'Facial and skin care', alt: 'rolled towels, bowls of face pack and a brush on a treatment trolley.' }) %>
+      <%- include('../partials/photo', { photo: site.photos.about[2], ratio: '32', label: 'Brow and eyelid work', alt: 'eyebrow threading at a parlour counter.' }) %>
+    </div>
+  </div>
+</section>
+
+<section class="section" id="welcome-all" aria-labelledby="welcome-all-title">
+  <div class="wrap wrap--narrow center">
+    <p class="eyebrow-pill"><span class="eyebrow-pill__star" aria-hidden="true">&#10022;</span> Everyone is welcome</p>
+    <h2 id="welcome-all-title">Book the service you need, as yourself</h2>
+    <p class="lede center-col">
+      Most of what the studio does is women’s beauty work, and that is what the catalogue leads with.
+      You are never asked to state your gender to browse a service or book a chair — the form only wants
+      a name, a number the studio can reach, and the service you want. LGBTQ+ clients are welcome here,
+      including for bridal, function and grooming appointments, and the account form accepts any title.
+    </p>
+    <p class="form-actions actions--center">
+      <a class="btn btn-arrow" href="/book">Book a slot <span class="chip" aria-hidden="true">&rarr;</span></a>
+      <a class="btn btn--ghost" href="/studio#inclusion">Read the studio’s welcome note</a>
+    </p>
+  </div>
+</section>
+
+<section class="section section--panel" id="find" aria-labelledby="find-title">
+  <div class="wrap grid grid--2">
+    <div>
+      <p class="eyebrow-pill"><span class="eyebrow-pill__star" aria-hidden="true">&#10022;</span> Find the studio</p>
+      <h2 id="find-title">College Road, near Lucky Mess, Bagurai</h2>
+      <ul class="info-list">
+        <li>
+          <span class="marker" aria-hidden="true">1</span>
+          <p><strong>Address.</strong> <span class="address"><%= salon.address %></span></p>
+        </li>
+        <li>
+          <span class="marker" aria-hidden="true">2</span>
+          <p><strong>Phone.</strong> <a href="tel:<%= salon.phoneHref %>"><%= salon.phone %></a> — the quickest way to check a same-day time.</p>
+        </li>
+        <li>
+          <span class="marker" aria-hidden="true">3</span>
+          <p><strong>Opening.</strong> The studio opens at <%= salon.opensAtLabel %>. The diary shows the exact times the team has opened for booking.</p>
+        </li>
+      </ul>
+      <div class="form-actions">
+        <a class="btn btn--ghost" href="<%= salon.mapsUrl %>" rel="noopener noreferrer" target="_blank">Open directions</a>
+        <a class="btn btn--ghost" href="/location">Location details</a>
+      </div>
+    </div>
+
+    <div class="card card--flat">
+      <h3 class="card__title">The diary right now</h3>
+      <table class="hours-table">
+        <caption class="sr-only">Days currently opened in the studio booking diary</caption>
+        <thead>
+          <tr><th scope="col">Day</th><th scope="col">Opens</th><th scope="col">Last slot starts</th></tr>
+        </thead>
+        <tbody>
+          <% week.slice(1).concat(week.slice(0, 1)).forEach(function (day) { %>
+            <tr>
+              <th scope="row"><%= day.label %></th>
+              <td><%= day.is_closed ? 'Closed' : day.opensLabel %></td>
+              <td><%= day.is_closed ? '—' : day.closesLabel %></td>
+            </tr>
+          <% }) %>
+        </tbody>
+      </table>
+      <p class="hint mt-1">
+        These are the days and clock times the booking diary is opened for. The studio adjusts them for
+        festivals and function season — if a day is not showing slots, call <%= salon.phone %>.
+      </p>
+    </div>
+  </div>
+</section>
+
+<%- include('../partials/footer') %>

@@ -1,0 +1,21 @@
+<%- include('../partials/head') %>
+
+<section class="section" aria-labelledby="page-title">
+  <div class="wrap wrap--read center">
+    <p class="eyebrow">Appointments</p>
+    <h1 id="page-title">Online booking is being set up</h1>
+    <p class="lede center-col">
+      The studio has not opened a bookable service in the diary yet, so there is nothing to reserve
+      online at the moment. Call and the team will fix a time with you directly.
+    </p>
+    <p class="form-actions actions--center">
+      <a class="btn" href="tel:<%= salon.phoneHref %>">Call <%= salon.phone %></a>
+      <a class="btn btn--ghost" href="/services">See the services</a>
+    </p>
+    <% if (isAdmin) { %>
+      <p class="hint"><a href="/admin/services">Mark services as bookable in the staff area</a> to switch online booking on.</p>
+    <% } %>
+  </div>
+</section>
+
+<%- include('../partials/footer') %>

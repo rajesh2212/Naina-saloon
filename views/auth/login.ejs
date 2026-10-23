@@ -1,0 +1,50 @@
+<%- include('../partials/head') %>
+
+<section class="section" aria-labelledby="page-title">
+  <div class="wrap wrap--narrow">
+    <div class="card card--accent">
+      <p class="eyebrow">Returning client</p>
+      <h1 id="page-title">Sign in to your account</h1>
+      <p class="muted">
+        Signing in lets you see your requests, follow the studio’s confirmation and book another time.
+        New here? <a href="/auth/register">Create an account</a> — it takes a minute.
+      </p>
+
+      <% if (errors.form) { %><p class="alert alert--error" role="alert"><%= errors.form %></p><% } %>
+
+      <form method="post" action="/auth/login" class="mt-2" data-once>
+        <%- csrfField() %>
+
+        <div class="field">
+          <label for="email">Email address</label>
+          <input class="input" id="email" name="email" type="email" inputmode="email"
+                 autocomplete="email" required <% if (values.email) { %>value="<%= values.email %>"<% } %>
+                 <% if (errors.email) { %>aria-invalid="true" aria-describedby="email-error"<% } %>>
+          <% if (errors.email) { %><p class="error" id="email-error"><%= errors.email %></p><% } %>
+        </div>
+
+        <div class="field">
+          <label for="password">Password</label>
+          <input class="input" id="password" name="password" type="password"
+                 autocomplete="current-password" required
+                 <% if (errors.password) { %>aria-invalid="true" aria-describedby="password-error"<% } %>>
+          <% if (errors.password) { %><p class="error" id="password-error"><%= errors.password %></p><% } %>
+          <p class="hint"><a href="/auth/forgot-password">Forgot your password?</a></p>
+        </div>
+
+        <%- include('../partials/captcha') %>
+
+        <div class="form-actions">
+          <button class="btn" type="submit">Sign in</button>
+          <a class="btn btn--ghost" href="/auth/register">Create an account</a>
+        </div>
+        <p class="form-note">
+          Attempts are limited from one connection, and the human check is verified on the studio’s
+          server. Your password is never stored in plain text.
+        </p>
+      </form>
+    </div>
+  </div>
+</section>
+
+<%- include('../partials/footer') %>

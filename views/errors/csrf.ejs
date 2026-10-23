@@ -1,0 +1,21 @@
+<%- include('../partials/head') %>
+
+<section class="section" aria-labelledby="page-title">
+  <div class="wrap wrap--read">
+    <p class="eyebrow">Security check</p>
+    <h1 id="page-title">Your session expired before that was sent</h1>
+    <p class="lede">
+      For your protection this site checks that every form came from your own open session. That check
+      did not match — usually because the page sat open for a long time, or you came back to an old tab.
+      Nothing was saved and no appointment was taken.
+    </p>
+    <div class="form-actions">
+      <a class="btn" href="/book">Start again</a>
+      <a class="btn btn--ghost" href="/account">My account</a>
+      <a class="btn btn--ghost" href="/">Home</a>
+    </div>
+    <p class="form-note">If it keeps happening, close other tabs of this site and sign in once more.</p>
+  </div>
+</section>
+
+<%- include('../partials/footer') %>

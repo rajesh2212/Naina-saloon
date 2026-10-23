@@ -1,0 +1,31 @@
+{
+  "name": "naina-beauty-parlour",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Naina Beauty Parlour — Salon Make-up Studio, Jagannathpur, Bhadrak. Service catalogue and appointment slot booking.",
+  "main": "server.js",
+  "type": "commonjs",
+  "engines": {
+    "node": ">=22.5.0"
+  },
+  "scripts": {
+    "start": "node --no-warnings server.js",
+    "dev": "node --no-warnings --watch server.js",
+    "db:migrate": "node --no-warnings scripts/migrate.js",
+    "db:seed": "node --no-warnings scripts/seed.js",
+    "db:setup": "npm run db:migrate && npm run db:seed",
+    "create-admin": "node --no-warnings scripts/create-admin.js",
+    "slots:generate": "node --no-warnings scripts/generate-slots.js",
+    "check": "node --no-warnings scripts/check.js"
+  },
+  "dependencies": {
+    "bcryptjs": "^3.0.2",
+    "ejs": "^3.1.10",
+    "express": "^4.21.2",
+    "express-rate-limit": "^7.5.0",
+    "express-session": "^1.18.1",
+    "helmet": "^8.1.0",
+    "nodemailer": "^6.10.1",
+    "svg-captcha": "^1.4.0"
+  }
+}

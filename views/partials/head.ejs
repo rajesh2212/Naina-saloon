@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title><%= title %> · <%= salon.name %></title>
+    <meta name="description" content="<%= salon.name %> — <%= salon.tagline %> in Jagannathpur, Bhadrak, Odisha. Bridal and occasion makeup, hair, skin and beauty services since <%= salon.since %>. Book an appointment online.">
+    <meta name="theme-color" content="#fdf8f4">
+    <meta name="color-scheme" content="light">
+    <link rel="icon" href="/favicon.svg">
+    <link rel="stylesheet" href="/styles.css?v=<%= assets.version %>">
+    <script src="/main.js" defer></script>
+  </head>
+  <body class="minimal-page">
+    <a class="skip-link" href="#main">Skip to main content</a>
+
+    <header class="site-header">
+      <div class="wrap site-header__inner">
+        <% var path = currentPath || '/'; %>
+        <nav class="nav" id="primary-nav" data-nav data-open="false" aria-label="Main">
+          <ul class="nav__list">
+            <li><a class="nav__link" href="/services"<%= path.indexOf('/services') === 0 ? ' aria-current="page"' : '' %>>Services</a></li>
+            <li><a class="nav__link" href="/studio"<%= path === '/studio' ? ' aria-current="page"' : '' %>>The studio</a></li>
+            <li><a class="nav__link" href="/how-to-book"<%= path === '/how-to-book' ? ' aria-current="page"' : '' %>>Your visit</a></li>
+            <li><a class="nav__link" href="/location"<%= path === '/location' ? ' aria-current="page"' : '' %>>Find us</a></li>
+            <%# The same account links live here and in .header-cta; CSS shows exactly one set per breakpoint. %>
+            <% if (currentUser) { %>
+              <li class="nav__auth"><a class="nav__link" href="/account">My bookings</a></li>
+              <% if (isAdmin) { %><li class="nav__auth"><a class="nav__link" href="/admin">Staff area</a></li><% } %>
+            <% } else { %>
+              <li class="nav__auth"><a class="nav__link" href="/auth/login">Sign in</a></li>
+              <li class="nav__auth"><a class="nav__link" href="/auth/register">Create an account</a></li>
+            <% } %>
+          </ul>
+        </nav>
+
+        <a class="brand" href="/">
+          <span class="brand__mark" aria-hidden="true">N</span>
+          <span class="brand__text">
+            <span class="brand__name">Naina <em>Beauty</em> <span class="brand__tail">Parlour</span></span>
+            <span class="brand__tag">Salon Make-up Studio</span>
+          </span>
+        </a>
+
+        <button class="nav-toggle" type="button" data-nav-toggle aria-expanded="false" aria-controls="primary-nav">
+          <span class="nav-toggle__label-open">Menu</span>
+          <span class="nav-toggle__label-close">Close</span>
+        </button>
+
+        <div class="header-cta">
+          <% if (currentUser) { %>
+            <a class="btn btn--ghost btn--sm header-cta__auth" href="/account">My bookings</a>
+            <% if (isAdmin) { %><a class="btn btn--primary btn--sm header-cta__auth" href="/admin">Staff area</a><% } %>
+          <% } else { %>
+            <a class="btn btn--ghost btn--sm header-cta__auth" href="/auth/login">Sign in</a>
+          <% } %>
+          <a class="btn btn--sm" href="/book"><span class="btn__label--long">Book an appointment</span><span class="btn__label--short">Book</span></a>
+        </div>
+      </div>
+    </header>
+
+    <main id="main">
+      <%- include('flash') %>

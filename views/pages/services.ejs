@@ -1,0 +1,85 @@
+<%- include('../partials/head') %>
+
+<section class="section" aria-labelledby="page-title">
+  <div class="wrap">
+    <p class="eyebrow">Service catalogue</p>
+    <h1 id="page-title">Everything the studio books online</h1>
+    <p class="lede">
+      <%= stats.services %> services across <%= stats.categories %> groups. Chair times are the length the
+      diary holds the slot for. Prices are confirmed by the studio at your appointment or over the
+      phone — this website does not take payment.
+    </p>
+
+    <div class="tabs mt-2" role="navigation" aria-label="Jump to a service group">
+      <% categories.forEach(function (category) { %>
+        <a href="#<%= category.slug %>"><%= category.name %></a>
+      <% }) %>
+    </div>
+
+    <% categories.forEach(function (category) { %>
+      <section class="mt-3" id="<%= category.slug %>" aria-labelledby="<%= category.slug %>-title">
+        <h2 id="<%= category.slug %>-title"><%= category.name %></h2>
+        <p class="muted"><%= category.summary %></p>
+
+        <% if (!category.services.length) { %>
+          <p class="empty">The studio has not listed services in this group yet. Call <%= salon.phone %> to ask.</p>
+        <% } else { %>
+          <div class="table-wrap">
+            <table>
+              <caption class="sr-only"><%= category.name %> — services, chair time and booking</caption>
+              <thead>
+                <tr>
+                  <th scope="col">Service</th>
+                  <th scope="col">Chair time</th>
+                  <th scope="col">Price</th>
+                  <th scope="col"><span class="sr-only">Book</span></th>
+                </tr>
+              </thead>
+              <tbody>
+                <% category.services.forEach(function (service) { %>
+                  <tr>
+                    <th scope="row">
+                      <%= service.name %>
+                      <% if (service.description) { %><p class="small muted mt-0 mb-0"><%= service.description %></p><% } %>
+                    </th>
+                    <td class="nowrap"><%= service.duration_minutes %> min</td>
+                    <td><%= service.price_text || 'At the studio' %></td>
+                    <td>
+                      <% if (service.is_bookable) { %>
+                        <a class="btn btn--sm" href="/book?service=<%= service.id %>">Book</a>
+                      <% } else { %>
+                        <span class="badge badge--muted">Ask the studio</span>
+                      <% } %>
+                    </td>
+                  </tr>
+                <% }) %>
+              </tbody>
+            </table>
+          </div>
+        <% } %>
+      </section>
+    <% }) %>
+
+    <hr class="rule">
+
+    <div class="card card--accent">
+      <h2 class="card__title">Something not on the list?</h2>
+      <p>
+        The studio handles combination work for weddings — makeup plus hair plus draping for the same
+        morning, or a group booking for the family. Those are arranged by phone so the team can block
+        enough chair time.
+      </p>
+      <p class="form-actions">
+        <a class="btn" href="tel:<%= salon.phoneHref %>">Call <%= salon.phone %></a>
+        <a class="btn btn--ghost" href="/book">Book a standard service</a>
+      </p>
+      <p class="hint">
+        Booking settings the studio applies right now: slots every <%= rules.stepMinutes %> minutes, dates
+        up to <%= rules.horizonDays %> days ahead, and at least <%= rules.leadMinutes %> minutes’ notice on the
+        same day.
+      </p>
+    </div>
+  </div>
+</section>
+
+<%- include('../partials/footer') %>

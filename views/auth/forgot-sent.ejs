@@ -1,0 +1,46 @@
+<%- include('../partials/head') %>
+
+<section class="section" aria-labelledby="page-title">
+  <div class="wrap wrap--narrow">
+    <div class="card card--accent">
+      <p class="eyebrow">Check your inbox</p>
+      <h1 id="page-title">If that address is on our books, a reset link is on its way</h1>
+      <p class="lede">
+        We sent a message to <strong><%= email %></strong> with a link to choose a new password.
+        The link works once and expires in <%= minutes %> minutes. Do not see it? Check the spam or
+        promotions folder, then try again.
+      </p>
+
+      <ul class="info-list mt-2">
+        <li>
+          <span class="marker" aria-hidden="true">1</span>
+          <p><strong>Open the email</strong> and tap “Choose a new password”.</p>
+        </li>
+        <li>
+          <span class="marker" aria-hidden="true">2</span>
+          <p><strong>Type the new password twice.</strong> At least 10 characters, with a letter and a number.</p>
+        </li>
+        <li>
+          <span class="marker" aria-hidden="true">3</span>
+          <p><strong>You are signed in</strong> straight after, and can go on to <a href="/book">book a slot</a>.</p>
+        </li>
+      </ul>
+
+      <% if (via === 'outbox') { %>
+        <p class="alert alert--info" role="status">
+          <strong>Development outbox.</strong> No SMTP server is configured, so the message was written
+          to <code>data/outbox/</code> on this machine instead of being emailed. Set the SMTP variables
+          in <code>.env</code> for real delivery.
+        </p>
+      <% } %>
+
+      <div class="form-actions">
+        <a class="btn btn--primary" href="/auth/login">Go to sign in</a>
+        <a class="btn btn--ghost" href="/auth/forgot-password">Send it again</a>
+        <a class="btn btn--ghost" href="tel:<%= salon.phoneHref %>">Call <%= salon.phone %></a>
+      </div>
+    </div>
+  </div>
+</section>
+
+<%- include('../partials/footer') %>

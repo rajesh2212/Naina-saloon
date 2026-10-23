@@ -1,0 +1,40 @@
+<%
+/*
+  One image slot, resolved in three tiers:
+    1. the studio's own photograph, once it is dropped into public/assets/
+    2. a generated illustrative stand-in from public/assets/art/, clearly tagged
+    3. a labelled panel, if even the artwork is missing — so nothing is blank
+
+  Tier 2 always carries a visible "Illustrative" tag and an alt prefix. The
+  pictures are generated, not shots of this studio, and the page never claims
+  otherwise. Dropping the real file in replaces the artwork automatically.
+  Usage: include('../partials/photo', { photo: site.photos.hero[0], alt: '…', label: '…', ratio: '43', eager: true })
+*/
+const ratioClass = `ratio--${(typeof ratio === 'string' && ratio) || '43'}`;
+const showHint = !site.isProduction || isAdmin;
+// Only the hero passes `eager`; most slots omit it, so it cannot be read bare.
+const loadAttr = typeof eager !== 'undefined' && eager ? 'eager' : 'lazy';
+%>
+<% if (photo.present) { %>
+  <img class="photo <%= ratioClass %>"
+       src="<%= photo.src %>"
+       alt="<%= alt %>"
+       loading="<%= loadAttr %>"
+       decoding="async">
+<% } else if (photo.artSrc) { %>
+  <span class="shot <%= ratioClass %>">
+    <img class="shot__img"
+         src="<%= photo.artSrc %>"
+         alt="Illustrative image — <%= alt %>"
+         loading="<%= loadAttr %>"
+         decoding="async">
+    <span class="shot__tag">Illustrative</span>
+  </span>
+<% } else { %>
+  <span class="ph <%= ratioClass %>" role="img" aria-label="<%= alt %> — no image has been added to this slot yet">
+    <span class="ph__glyph" aria-hidden="true"></span>
+    <span class="ph__label"><%= label %></span>
+    <span class="ph__note">Photograph coming soon</span>
+    <% if (showHint) { %><span class="ph__file">drop <code><%= photo.file %></code> into <code>public/assets/</code></span><% } %>
+  </span>
+<% } %>

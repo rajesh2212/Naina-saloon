@@ -1,0 +1,64 @@
+<%- include('../partials/head') %>
+
+<section class="section" aria-labelledby="page-title">
+  <div class="wrap wrap--narrow">
+    <div class="card card--accent">
+      <p class="eyebrow">Account recovery</p>
+      <h1 id="page-title">Forgot your password?</h1>
+      <p class="muted">
+        Enter the email you signed up with and the studio sends a one-time link to choose a new
+        password. The link works once and expires after an hour.
+      </p>
+
+      <% if (!mail.enabled) { %>
+        <div class="alert alert--error" role="alert">
+          <div>
+            <strong>Email delivery is not configured on this website.</strong>
+            <p class="mt-1 mb-0">
+              A reset link cannot be sent until the studio’s mail settings are filled in, so there is no
+              point in submitting the form. Please call
+              <a href="tel:<%= salon.phoneHref %>"><%= salon.phone %></a> and the team will set your
+              password at the counter.
+            </p>
+            <% if (mail.reason) { %><p class="hint mb-0">Server note: <%= mail.reason %>.</p><% } %>
+          </div>
+        </div>
+      <% } %>
+
+      <% if (notice) { %>
+        <p class="alert alert--error" role="alert"><%= notice %></p>
+      <% } %>
+
+      <% if (mail.enabled) { %>
+        <form method="post" action="/auth/forgot-password" class="mt-2" data-once>
+          <%- csrfField() %>
+
+          <div class="field">
+            <label for="email">Email address</label>
+            <input class="input" id="email" name="email" type="email" inputmode="email"
+                   autocomplete="email" required maxlength="200" value="<%= values.email || '' %>"
+                   <% if (errors.email) { %>aria-invalid="true" aria-describedby="email-error"<% } %>>
+            <% if (errors.email) { %><p class="error" id="email-error"><%= errors.email %></p><% } %>
+          </div>
+
+          <%- include('../partials/captcha') %>
+
+          <div class="form-actions">
+            <button class="btn" type="submit">Send me a reset link</button>
+            <a class="btn btn--ghost" href="/auth/login">Back to sign in</a>
+          </div>
+          <p class="form-note">
+            If the address is not on our books, this page still says the same thing, so nobody can use
+            the form to find out whether an account exists.
+          </p>
+        </form>
+      <% } else { %>
+        <p class="form-actions">
+          <a class="btn btn--ghost" href="/auth/login">Back to sign in</a>
+        </p>
+      <% } %>
+    </div>
+  </div>
+</section>
+
+<%- include('../partials/footer') %>

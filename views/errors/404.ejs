@@ -1,0 +1,20 @@
+<%- include('../partials/head') %>
+
+<section class="section" aria-labelledby="page-title">
+  <div class="wrap wrap--read center">
+    <p class="eyebrow">Page not found</p>
+    <h1 id="page-title">Nothing here</h1>
+    <p class="lede center-col">
+      That address is not part of the studio’s website. The service list, booking page and location are
+      below — or call the counter if you were following a link from somewhere else.
+    </p>
+    <div class="form-actions actions--center">
+      <a class="btn" href="/book">Book an appointment</a>
+      <a class="btn btn--ghost" href="/services">Services</a>
+      <a class="btn btn--ghost" href="/">Home</a>
+      <a class="btn btn--ghost" href="tel:<%= salon.phoneHref %>"><%= salon.phone %></a>
+    </div>
+  </div>
+</section>
+
+<%- include('../partials/footer') %>

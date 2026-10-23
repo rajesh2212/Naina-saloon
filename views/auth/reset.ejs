@@ -1,0 +1,47 @@
+<%- include('../partials/head') %>
+
+<section class="section" aria-labelledby="page-title">
+  <div class="wrap wrap--narrow">
+    <div class="card card--accent">
+      <p class="eyebrow">Account recovery</p>
+      <h1 id="page-title">Choose a new password</h1>
+      <p class="muted">
+        You are resetting the password for <strong><%= email %></strong>. When you save it, every other
+        device will have to sign in again and this link stops working.
+      </p>
+
+      <% if (errors.form) { %><p class="alert alert--error" role="alert"><%= errors.form %></p><% } %>
+
+      <form method="post" action="/auth/reset/<%= token %>" class="mt-2" data-once>
+        <%- csrfField() %>
+
+        <div class="field">
+          <label for="password">New password</label>
+          <input class="input" id="password" name="password" type="password"
+                 autocomplete="new-password" required minlength="10"
+                 aria-describedby="password-hint<%= errors.password ? ' password-error' : '' %>"
+                 <% if (errors.password) { %>aria-invalid="true"<% } %>>
+          <% if (errors.password) { %><p class="error" id="password-error"><%= errors.password %></p><% } %>
+          <p class="hint" id="password-hint">At least 10 characters, with at least one letter and one number.</p>
+        </div>
+
+        <div class="field">
+          <label for="confirm_password">Type the new password again</label>
+          <input class="input" id="confirm_password" name="confirm_password" type="password"
+                 autocomplete="new-password" required
+                 <% if (errors.confirm) { %>aria-invalid="true" aria-describedby="confirm-error"<% } %>>
+          <% if (errors.confirm) { %><p class="error" id="confirm-error"><%= errors.confirm %></p><% } %>
+        </div>
+
+        <%- include('../partials/captcha') %>
+
+        <div class="form-actions">
+          <button class="btn" type="submit">Save new password</button>
+          <a class="btn btn--ghost" href="/auth/forgot-password">Send a different link</a>
+        </div>
+      </form>
+    </div>
+  </div>
+</section>
+
+<%- include('../partials/footer') %>
