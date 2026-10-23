@@ -368,33 +368,45 @@ li { margin: 0 0 .35em; }
    The copy sits in the pale band and the stats in the peach, so near-black text
    never has to fight a saturated background. */
 .hero {
-  --fig-w: min(86vw, 430px);
-  /* The lift is a share of her own width, not of the viewport: the width is capped,
-     so a viewport-unit lift keeps climbing past that cap and pushes the top of her
-     head out through the hero's clipped edge. */
-  --fig-lift: calc(var(--fig-w) * .56);
-  --fig-x: calc(var(--fig-w) * .07);
+  --pad: clamp(1rem, 4vw, 2.5rem);
+  /* Half the measure that the wordmark and the copy share. `.wrap` caps it at
+     1180px, so above that width the columns stop growing and only the gutters do.
+     The 8px is the scrollbar: `50vw` measures the viewport, the hero measures what
+     is left of it. */
+  --wrap-half: min(550px, calc(50vw - 8px - var(--pad)));
+  --fig-w: min(74vw, 340px);
+  /* Where her silhouette actually sits inside the picture box. The PNG is 880 x 1100
+     with an alpha bounding box of x 62-728 / y 277-1099, so the ink starts 7.05% of
+     the box width from its left edge, stops 17.27% short of the right one, and her
+     crown is 31.48% of the box width below the top. Everything below is placed by
+     those, never by the edge of the box. */
+  --fig-ink-l: .0705;
+  --fig-ink-r: .8273;
+  --fig-crown: .3148;
+  /* The band of pixels left of her. The wordmark is sized to fill it and the copy
+     column is cut to it, which is what makes the two read as one composition. */
+  --word-slot: calc(2 * var(--wrap-half));
   position: relative;
   isolation: isolate;
   overflow: hidden;
   background: linear-gradient(172deg, #fffdfb 0%, var(--blush) 46%, #f9dcc4 100%);
   padding-block: 0 clamp(2.5rem, 6vw, 4.5rem);
 }
-/* The oversized wordmark is decoration, never content. It is in normal flow
-   rather than absolutely positioned so the copy below can never collide with a
-   letter at an unforeseen width. It is painted OVER the portrait: the peach is
-   clipped to the glyphs and fades to clear toward the hem, so where a letter
-   crosses her face the picture shows through the stroke instead of being cut
-   out by it. Nothing solid sits behind the word. */
+/* The oversized wordmark is decoration, never content, so it is `aria-hidden` and
+   left-aligned inside the same `.wrap` as the copy beneath it — the two share a left
+   edge. It stays in normal flow rather than being absolutely positioned so the copy
+   can never collide with a letter at an unforeseen width. */
 .hero__word {
   position: relative;
   z-index: 2;
-  margin: clamp(1.25rem, 4vw, 2.5rem) 0 0;
-  text-align: center;
+  margin: clamp(1.25rem, 4vw, 2.5rem) auto 0;
+  text-align: left;
   font-family: var(--serif);
-  /* The floor and the slope keep the ink narrower than the content box on the
-     smallest phones, so the two never have to fight over the same few pixels. */
-  font-size: clamp(3.75rem, 20.5vw, 13rem);
+  /* 4.15em is the widest "NAINA" the serif stack can produce — Palatino Linotype
+     measures 3.955em, Iowan Old Style and Georgia nearer 3.66em — with a few percent
+     spare. Dividing the slot by it means the word lands just short of her hair on
+     every machine instead of only on the one it was drawn on. */
+  font-size: min(calc(var(--word-slot) / 4.15), 8.5rem);
   font-weight: 500;
   line-height: .82;
   letter-spacing: .08em;
@@ -402,28 +414,30 @@ li { margin: 0 0 .35em; }
   user-select: none;
 }
 /* Guarded: without a working `background-clip: text` the transparent fill would
-   simply erase the wordmark, so those browsers keep the flat peach. */
+   simply erase the wordmark, so those browsers keep the flat peach. The fade stops
+   well short of clear — the word stands on the pale gradient on its own now rather
+   than crossing her face, and ink that thins to nothing there reads as a bug. */
 @supports ((-webkit-background-clip: text) or (background-clip: text)) {
   .hero__word {
     color: transparent;
     background-image: linear-gradient(178deg,
-      #f0b489 0%,
-      rgba(238, 169, 129, .84) 34%,
-      rgba(237, 167, 127, .46) 66%,
-      rgba(236, 166, 126, .08) 100%);
+      #e9a06c 0%,
+      rgba(238, 169, 129, .95) 40%,
+      rgba(237, 167, 127, .8) 72%,
+      rgba(236, 166, 126, .62) 100%);
     -webkit-background-clip: text;
     background-clip: text;
   }
 }
 .hero__inner {
   position: relative;
-  /* Always above both the wordmark and the portrait: the running text and the
-     booking buttons are the only things in here that carry meaning. */
+  /* Above both the wordmark and the portrait: the running text and the booking
+     buttons are the only things in here that carry meaning. */
   z-index: 3;
   display: grid;
   gap: clamp(1.5rem, 4vw, 3rem);
   align-items: start;
-  margin-top: var(--fig-lift);
+  margin-top: clamp(1.25rem, 4vw, 2rem);
 }
 .hero h1 { color: var(--ink); font-size: clamp(2rem, 1.3rem + 3.2vw, 3.4rem); margin-bottom: .45em; }
 /* No max-width here: a `ch` cap on the column also caps the oversized headline,
@@ -433,24 +447,20 @@ li { margin: 0 0 .35em; }
 .hero__actions { display: flex; flex-wrap: wrap; gap: .75rem; }
 .hero__note { margin-top: 1.25rem; font-size: .88rem; color: var(--muted); max-width: 48ch; }
 
-/* The figure is a cutout carrying its own alpha, so it is placed by where she
-   actually is rather than by the edge of a box: the picture's transparent margins
-   overlap the header and the copy column freely because they cover nothing.
-   Stacked regimes centre her box first, then `--fig-x` slides it toward the right
-   of the wordmark — her crown is a narrow peak, so on a small screen it can only
-   reach the two middle letters by leaning on the later pair. */
+/* Below the side-by-side cursor she is stacked under the word and pushed to the
+   right, which is the same corner she occupies above it. The negative top margin
+   takes the empty band above her crown out of the flow, so the gap under the word
+   is her hairline, not a picture-box height of nothing. */
 .hero__media {
   position: relative;
-  /* The bottom layer of the hero's three: she is painted first, the wordmark washes
-     over her, the copy over both. */
   z-index: 1;
-  /* Lifted into the wordmark by `--fig-lift`; the copy underneath is pushed down by
-     the same amount, so she rises into the letters without dragging the headline up
-     onto her own shoulders. */
-  margin-top: calc(-1 * var(--fig-lift));
   width: var(--fig-w);
-  margin-inline: auto;
-  transform: translateX(var(--fig-x));
+  /* The negative part lifts the empty band above her crown out of the flow, so the
+     gap under the word is her hairline rather than a picture-box height of nothing.
+     The positive part has to clear the wordmark's own overhang: `line-height: .82`
+     packs the line box tighter than the letters, so their feet sit ~.26em below it,
+     and the slot formula above turns that into a share of the word's width. */
+  margin: calc(-1 * var(--fig-crown) * var(--fig-w) + var(--word-slot) * .065 + 8px) 0 0 auto;
 }
 /* A cutout gets no mat, no border, no shadow and no clip — she sits straight on the
    gradient. Slots that are not flagged `cutout` keep the print frame, and so does the
@@ -512,50 +522,49 @@ li { margin: 0 0 .35em; }
 .stat-card span { display: block; margin-top: .25rem; font-size: .86rem; color: var(--ink-soft); }
 .stat-card em { display: block; margin-top: .5rem; font-style: normal; font-size: .76rem; color: var(--muted); }
 
-/* Tablet: she is still stacked between the wordmark and the copy, only larger. */
-@media (min-width: 621px) and (max-width: 959.98px) {
-  .hero { --fig-w: min(66vw, 560px); --fig-lift: calc(var(--fig-w) * .61); --fig-x: calc(var(--fig-w) * .09); }
-  .hero__word { margin-top: 1.75rem; }
-}
-
-/* Desktop: the figure leaves the grid entirely. Her box is placed off the hero's
-   centre — the same centre the wordmark is centred on — so her crown rises under the
-   wordmark's fourth and fifth letters while "N A I" reads clear to the left of her.
-   Those two letters now sit on top of her hair, fading out before their feet do.
-   The transparent margins around her are what overlap the header and the copy, which
-   is why the box can be pulled up past the top of the hero without covering anything:
-   `overflow: hidden` on `.hero` only ever clips empty pixels. She is painted under
-   the copy, so if a wider picture ever reaches the text, the text wins. */
-@media (min-width: 960px) {
-  .hero { --fig-w: min(700px, 69vw); }
+/* From the tablet cursor up she leaves the grid and the two halves meet: her
+   silhouette's right edge lands on the copy measure's right edge, so the wordmark and
+   the band left of her are the same width at every size, and the word is sized to fill
+   exactly that band. Nothing overlaps — the last letter stops where her hair begins.
+   Her box still reaches past the hero on top and right, but `overflow: hidden` only
+   ever clips the transparent margin around her, and she is painted under the copy, so
+   if a wider picture ever reached the text the text would win. */
+@media (min-width: 700px) {
+  .hero {
+    --fig-w: min(700px, 54.5vw);
+    /* Her silhouette is 75.68% of the box wide; the 16px is the breathing room
+       between the last letter and the first strand of hair. */
+    --word-slot: calc(2 * var(--wrap-half) - .7568 * var(--fig-w) - 16px);
+  }
   .hero__word { margin-top: 2.25rem; }
-  /* The copy column is ~532px from 1280 up, so the headline keeps its three-line
-     break only if the type tracks the column. */
-  .hero h1 { font-size: clamp(2rem, 4.2vw, 3.35rem); }
+  /* The column tracks the wordmark's width, so the headline breaks on the same edge
+     the word ends on rather than on a percentage that drifts away from it. */
   .hero__inner {
     margin-top: 0;
-    grid-template-columns: minmax(0, calc(50% - 17px));
+    grid-template-columns: minmax(0, var(--word-slot));
   }
+  .hero h1 { font-size: clamp(1.8rem, 3.4vw, 3.35rem); }
   .hero__media {
     position: absolute;
-    top: calc(36px + min(21px, 2.07vw) - .341 * var(--fig-w));
-    left: calc(50% - min(130px, 12.8vw));
+    /* Placed by her crown, not by the box: 26px under the top of the hero, which is
+       where the wordmark's own cap-height band starts. */
+    top: calc(26px - var(--fig-crown) * var(--fig-w));
+    left: calc(50% + var(--wrap-half) - var(--fig-ink-r) * var(--fig-w));
     width: var(--fig-w);
     margin: 0;
-    /* `left` does the horizontal work here, so the stacked shift must not stack on top of it. */
-    transform: none;
     z-index: 1;
-    /* A cutout's empty half still boxes the headline and the booking button, and a
-       box swallows clicks whether it is painted or not. Nothing here is a control. */
+    /* An empty half of a cutout still boxes the headline and the booking button, and
+       a box swallows clicks whether it is painted or not. Nothing here is a control. */
     pointer-events: none;
   }
 }
 
 /* Once she has a box of her own to sit in, the badge can hug its corner. Over a
-   cutout the bottom-left corner belongs to the `Illustrative` chip, so from 700px
-   up the badge stands off it to the right. */
+   cutout the bottom-left corner belongs to the `Illustrative` chip — about 109px of
+   box once she is 380px wide, the smallest side-by-side size — so the badge stands
+   off it to the right and never lands on top of it. */
 @media (min-width: 700px) {
-  .hero__badge { left: 24%; max-width: 46%; }
+  .hero__badge { left: 30%; max-width: 44%; }
 }
 
 /* On a narrow screen the overlay badge sat on top of most of the portrait, so
@@ -568,6 +577,68 @@ li { margin: 0 0 .35em; }
     box-shadow: none;
   }
 }
+
+/* ---------- hero entrance ------------------------------------------------- */
+/* The clip the frames come from is one slow, calm camera move: the wordmark settles,
+   the portrait arrives from below and then keeps drifting, and the cards surface last.
+   So the entrance only ever touches `opacity`, `translate` and the wordmark's own
+   tracking — the final frame of every animation is the layout measured above, and
+   nothing outside the header and the hero moves at all. */
+@keyframes header-drop {
+  from { opacity: 0; translate: 0 -10px; }
+  to   { opacity: 1; translate: 0 0; }
+}
+/* The tracking starts tighter than the finished word and opens out to it, which is
+   the direction that can never collide with her: mid-animation the word is narrower
+   than the slot, never wider. */
+@keyframes hero-word {
+  from { opacity: 0; letter-spacing: .025em; translate: 0 12px; }
+  to   { opacity: 1; letter-spacing: .08em; translate: 0 0; }
+}
+@keyframes hero-figure {
+  from { opacity: 0; translate: 0 36px; }
+  to   { opacity: 1; translate: 0 0; }
+}
+@keyframes hero-rise {
+  from { opacity: 0; translate: 0 18px; }
+  to   { opacity: 1; translate: 0 0; }
+}
+/* The one thing that never stops: half a centimetre of lift every sixteen seconds,
+   so the picture is not a still. It is on the image rather than on the figure's box
+   because the box carries the entrance and the pointer parallax. */
+@keyframes hero-drift {
+  from { translate: 0 -5px; }
+  to   { translate: 0 5px; }
+}
+
+.site-header .brand,
+.site-header .nav,
+.site-header .header-cta { animation: header-drop .7s cubic-bezier(.22, .61, .36, 1) both; }
+.site-header .nav { animation-delay: .07s; }
+.site-header .header-cta { animation-delay: .14s; }
+
+.hero__word { animation: hero-word 1.15s cubic-bezier(.22, .61, .36, 1) .12s both; }
+.hero__media { animation: hero-figure 1.3s cubic-bezier(.19, .72, .25, 1) .2s both; }
+.hero__media .photo,
+.hero__media .shot__img { animation: hero-drift 16s ease-in-out 1.5s infinite alternate; }
+.hero .eyebrow-pill { animation: hero-rise .85s cubic-bezier(.22, .61, .36, 1) .5s both; }
+.hero h1 { animation: hero-rise .95s cubic-bezier(.22, .61, .36, 1) .6s both; }
+.hero__lede { animation: hero-rise .9s cubic-bezier(.22, .61, .36, 1) .72s both; }
+.hero__actions { animation: hero-rise .9s cubic-bezier(.22, .61, .36, 1) .84s both; }
+.hero__note { animation: hero-rise .9s cubic-bezier(.22, .61, .36, 1) .96s both; }
+.hero__badge { animation: hero-rise .9s cubic-bezier(.22, .61, .36, 1) 1.15s both; }
+.hero__stats .stat-card { animation: hero-rise .9s cubic-bezier(.22, .61, .36, 1) both; }
+.hero__stats .stat-card:nth-child(1) { animation-delay: 1.05s; }
+.hero__stats .stat-card:nth-child(2) { animation-delay: 1.18s; }
+.hero__stats .stat-card:nth-child(3) { animation-delay: 1.31s; }
+
+/* Pointer parallax, in the two directions the frames move. The offsets come from
+   `--par-x` / `--par-y`, which `main.js` writes as plain numbers in the range ±1; the
+   amplitudes below are what keep the word clear of her hair (the gap is 32px at the
+   narrowest side-by-side width, and the two move away from each other by 11px at the
+   extreme) and her crown clear of the top of the hero, which clips. */
+.hero__word { transform: translate3d(calc(var(--par-x, 0) * 3px), calc(var(--par-y, 0) * 2px), 0); }
+.hero__media { transform: translate3d(calc(var(--par-x, 0) * -8px), calc(var(--par-y, 0) * -5px), 0); }
 
 /* ---------- labelled photo slots ------------------------------------------ */
 .ph {
@@ -1190,6 +1261,18 @@ td .btn { margin: .15rem .2rem .15rem 0; }
     scroll-behavior: auto !important;
   }
   .btn:hover { transform: none; }
+  /* Named rather than left to the blanket rule above: the header and hero entrance
+     are the definition of nonessential motion, and switching the animation off
+     outright means each of these simply renders in the settled position it animates
+     towards, with no frame in which the wordmark or the portrait is not there. */
+  .site-header .brand, .site-header .nav, .site-header .header-cta,
+  .hero__word, .hero__media, .hero__media .photo, .hero__media .shot__img,
+  .hero .eyebrow-pill, .hero h1, .hero__lede, .hero__actions, .hero__note,
+  .hero__badge, .hero__stats .stat-card {
+    animation-name: none !important;
+    /* Also drops the pointer parallax, which `main.js` refuses to attach here anyway. */
+    transform: none !important;
+  }
 }
 
 @media print {

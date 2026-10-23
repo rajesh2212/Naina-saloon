@@ -391,19 +391,51 @@ The boot banner and `npm run check` both report how many slots hold a real
 photograph, so the team can see what shooting is still outstanding; the admin
 "Studio diary" screen lists the exact filenames that are missing.
 
-### The hero portrait is a cutout, not a card
+### The hero: wordmark left, portrait right, nothing overlapping
 
 The hero's picture carries its own transparency: no mat, border, rounded corner
-or shadow, so the figure sits straight on the white-to-peach gradient. The
-oversized `NAINA` wordmark is painted *over* her, filled with a peach gradient
-that fades to clear before the letters reach their feet, so the strokes crossing
-her hair stay legible without erasing the face behind them. She is the bottom
-layer, the wordmark the middle one and the copy the top one, which is why the
-headline and the booking buttons survive any width the picture reaches; the
-figure's box is `pointer-events: none` on desktop, where it is taken out of the
-grid and positioned over the text column. Her size, lift and sideways shift are
-all derived from one custom property (`--fig-w`), so the composition scales
-instead of drifting at the widths where the size cap binds.
+or shadow, so the figure sits straight on the white-to-peach gradient. From 700px
+up the oversized `NAINA` wordmark is left-aligned and she stands to its right, so
+the last letter stops where her hair begins — the two halves meet rather than
+cross, and neither one obscures the other. Below 700px they stack: the word on its
+own line, then her, pushed into the same right-hand corner she occupies above.
+
+Every position is derived from where her silhouette actually is, not from the edge
+of the picture box. The PNG's alpha bounding box is x 62–729 of 880 and y 275–1099
+of 1100, so the stylesheet keeps three constants — `--fig-ink-l`, `--fig-ink-r` and
+`--fig-crown` — and places her by them. One more variable, `--word-slot`, is the
+band of pixels left of her: the wordmark's font-size is `--word-slot / 4.15` (4.15em
+is the widest "NAINA" the serif stack can produce, Palatino Linotype at 3.955em, with
+a few percent spare) and the copy column is cut to the same width, so the headline
+breaks on the edge the word ends on at every viewport from 700 to 1920. The
+wordmark's peach gradient now fades only to about 62% alpha: it no longer crosses
+her face, and ink that thinned to nothing on a pale background read as a bug.
+
+She is the bottom layer, the wordmark the middle and the copy the top, so the
+headline and the booking buttons survive any width the picture reaches; her box is
+`pointer-events: none` above 700px, where it leaves the grid and is positioned over
+the text column.
+
+### The header and hero animate; nothing else does
+
+The reference clip is one slow camera move, so the entrance is the same idea: the
+header's three parts drop in, the wordmark settles from tighter tracking to its own
+(`.025em → .08em`, the direction that can only ever narrow the word, never push it
+across her), she rises 36px into place behind it, and the copy, the badge and the
+three cards ease up after her on staggered delays. `hero-drift` then keeps the
+picture alive with a ±5px lift every sixteen seconds, and a pointer parallax leans
+her a few pixels against the wordmark's movement — `main.js` writes plain `±1`
+numbers into `--par-x` / `--par-y` and the stylesheet decides the amplitudes, next
+to the measurements they have to stay inside. At the extreme the word still clears
+her hair by 21px, her crown still clears the clipped top of the hero by 19px, and
+she still leaves the copy column 8px short.
+
+No section below the hero moves, and the last frame of every animation is the layout
+described above, so what was measured is what settles. Under
+`prefers-reduced-motion: reduce` the entrance, the drift and the parallax are all
+switched off by name — each element simply renders where it animates towards, with
+no frame in which the wordmark or the portrait is missing — and `main.js` never
+attaches the pointer listener.
 
 ### One-row header below the desktop cursor
 

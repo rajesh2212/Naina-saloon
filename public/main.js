@@ -173,6 +173,36 @@
     }
   }
 
+  // ------------------------------------------------------ hero pointer drift
+  // The wordmark and the portrait lean a few pixels apart as the pointer moves, which
+  // is the only thing on the page that reacts to it. The numbers land in `--par-x` and
+  // `--par-y`; the amplitudes that turn them into pixels live in the stylesheet, next
+  // to the measurements they have to stay inside. A fine pointer only, and never when
+  // the visitor has asked for less movement — the CSS entrance is already disabled there.
+  var hero = doc.querySelector('.hero');
+  var calm = window.matchMedia('(prefers-reduced-motion: reduce)');
+  var precise = window.matchMedia('(hover: hover) and (pointer: fine)');
+  if (hero && !calm.matches && precise.matches) {
+    var driftX = 0;
+    var driftY = 0;
+    var frame = 0;
+    var paint = function () {
+      frame = 0;
+      hero.style.setProperty('--par-x', driftX.toFixed(3));
+      hero.style.setProperty('--par-y', driftY.toFixed(3));
+    };
+    window.addEventListener('pointermove', function (event) {
+      driftX = (event.clientX / window.innerWidth - 0.5) * 2;
+      driftY = (event.clientY / window.innerHeight - 0.5) * 2;
+      if (!frame) frame = window.requestAnimationFrame(paint);
+    }, { passive: true });
+    doc.addEventListener('mouseleave', function () {
+      driftX = 0;
+      driftY = 0;
+      if (!frame) frame = window.requestAnimationFrame(paint);
+    }, { passive: true });
+  }
+
   // ------------------------------------------------ double-submit protection
   doc.querySelectorAll('form[data-once]').forEach(function (form) {
     form.addEventListener('submit', function () {
