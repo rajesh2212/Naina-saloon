@@ -22,6 +22,21 @@
     });
   }
 
+  // ---------------------------------------------------- password reveal
+  // The input keeps its real `type="password"` without JS; this only ever changes
+  // the one field the button points at, and says which state it is in.
+  doc.querySelectorAll('[data-reveal]').forEach(function (button) {
+    var input = doc.getElementById(button.getAttribute('data-reveal'));
+    if (!input) return;
+    var label = button.querySelector('[data-reveal-label]');
+    button.addEventListener('click', function () {
+      var showing = input.type === 'password';
+      input.type = showing ? 'text' : 'password';
+      button.setAttribute('aria-pressed', showing ? 'true' : 'false');
+      if (label) label.textContent = showing ? 'Hide' : 'Show';
+    });
+  });
+
   // ------------------------------------------------------- CAPTCHA refresh
   doc.querySelectorAll('[data-captcha-refresh]').forEach(function (button) {
     button.addEventListener('click', function () {
@@ -38,6 +53,90 @@
       if (status) status.textContent = 'New image loaded. Type the characters you see.';
     });
   });
+
+  // ------------------------------------------- profile photo: crop, shrink, send
+  // The picture is squared and resized here so a phone camera never leaves the
+  // device at full size. The server re-checks every byte regardless.
+  var photoInput = doc.querySelector('[data-photo-input]');
+  if (photoInput) {
+    var photoData = doc.querySelector('[data-photo-data]');
+    var photoPreview = doc.querySelector('[data-photo-preview]');
+    var photoState = doc.querySelector('[data-photo-state]');
+    var photoRemove = doc.querySelector('[data-photo-remove]');
+    var SIDE = 256;
+
+    var say = function (message) {
+      if (photoState) {
+        photoState.hidden = false;
+        photoState.textContent = message;
+      }
+    };
+
+    var clearPick = function () {
+      photoData.value = '';
+      if (photoPreview) {
+        photoPreview.removeAttribute('src');
+        photoPreview.hidden = true;
+      }
+    };
+
+    var paint = function (source, width, height) {
+      var canvas = doc.createElement('canvas');
+      canvas.width = SIDE;
+      canvas.height = SIDE;
+      var ctx = canvas.getContext('2d');
+      if (!ctx) {
+        say('This browser cannot resize the picture, so it was not attached. Your other details still save.');
+        return;
+      }
+      var side = Math.min(width, height);
+      ctx.fillStyle = '#fdf8f4';
+      ctx.fillRect(0, 0, SIDE, SIDE);
+      ctx.drawImage(source, (width - side) / 2, (height - side) / 2, side, side, 0, 0, SIDE, SIDE);
+      var url = canvas.toDataURL('image/jpeg', 0.82);
+      photoData.value = url;
+      if (photoPreview) {
+        photoPreview.src = url;
+        photoPreview.hidden = false;
+      }
+      say('Squared and shrunk to ' + SIDE + ' px — it saves with the rest of your details.');
+    };
+
+    if (photoRemove) {
+      photoRemove.addEventListener('change', function () {
+        if (!photoRemove.checked) return;
+        clearPick();
+        if (photoInput.files && photoInput.files.length) photoInput.value = '';
+        say('The saved photo will be removed when you save.');
+      });
+    }
+
+    photoInput.addEventListener('change', function () {
+      var file = photoInput.files && photoInput.files[0];
+      clearPick();
+      if (!file) return;
+      if (!/image\/(jpeg|png|webp)/.test(file.type)) {
+        say('That file is not a JPEG, PNG or WebP picture. Choose another one.');
+        photoInput.value = '';
+        return;
+      }
+      if (file.size > 12 * 1024 * 1024) {
+        say('That picture is over 12 MB. Choose a smaller one.');
+        photoInput.value = '';
+        return;
+      }
+      say('Reading the picture…');
+      var reader = new FileReader();
+      reader.onload = function () {
+        var img = new Image();
+        img.onload = function () { paint(img, img.naturalWidth || img.width, img.naturalHeight || img.height); };
+        img.onerror = function () { say('That picture could not be opened. Try another file.'); };
+        img.src = reader.result;
+      };
+      reader.onerror = function () { say('That picture could not be read. Try another file.'); };
+      reader.readAsDataURL(file);
+    });
+  }
 
   // ------------------------------------------------- booking: slot loading
   var slotsForm = doc.querySelector('[data-slots-form]');

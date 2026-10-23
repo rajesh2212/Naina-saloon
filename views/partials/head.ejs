@@ -19,10 +19,14 @@
         <% var path = currentPath || '/'; %>
         <nav class="nav" id="primary-nav" data-nav data-open="false" aria-label="Main">
           <ul class="nav__list">
-            <li><a class="nav__link" href="/services"<%= path.indexOf('/services') === 0 ? ' aria-current="page"' : '' %>>Services</a></li>
-            <li><a class="nav__link" href="/studio"<%= path === '/studio' ? ' aria-current="page"' : '' %>>The studio</a></li>
-            <li><a class="nav__link" href="/how-to-book"<%= path === '/how-to-book' ? ' aria-current="page"' : '' %>>Your visit</a></li>
-            <li><a class="nav__link" href="/location"<%= path === '/location' ? ' aria-current="page"' : '' %>>Find us</a></li>
+            <%# aria-current is emitted with a plain scriptlet. Inside an interpolating tag the quotes
+                would come out as HTML entities, and both the CSS match and the screen-reader
+                announcement need the bare value. (Never write a tag example in here: the comment ends
+                at the first closing delimiter it sees.) %>
+            <li><a class="nav__link" href="/services"<% if (path.indexOf('/services') === 0) { %> aria-current="page"<% } %>>Services</a></li>
+            <li><a class="nav__link" href="/studio"<% if (path === '/studio') { %> aria-current="page"<% } %>>The studio</a></li>
+            <li><a class="nav__link" href="/how-to-book"<% if (path === '/how-to-book') { %> aria-current="page"<% } %>>Your visit</a></li>
+            <li><a class="nav__link" href="/location"<% if (path === '/location') { %> aria-current="page"<% } %>>Find us</a></li>
             <%# The same account links live here and in .header-cta; CSS shows exactly one set per breakpoint. %>
             <% if (currentUser) { %>
               <li class="nav__auth"><a class="nav__link" href="/account">My bookings</a></li>
@@ -51,14 +55,31 @@
         </button>
 
         <div class="header-cta">
+          <%# Booking lives in the hero, the nav and every service page. The header carries
+              the account controls only, so one action per strip and no squeezed buttons. %>
           <% if (currentUser) { %>
+            <a class="header-account" href="/account" aria-label="My account and profile">
+              <% if (currentUser.photo_path) { %>
+                <img class="header-account__img" src="<%= currentUser.photo_path %>" alt="" width="32" height="32">
+              <% } else { %>
+                <svg class="header-account__icon" width="22" height="22" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                  <circle cx="12" cy="8" r="4" fill="none" stroke="currentColor" stroke-width="1.8"></circle>
+                  <path d="M4.5 20c1.4-3.4 4.1-5 7.5-5s6.1 1.6 7.5 5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"></path>
+                </svg>
+              <% } %>
+            </a>
             <a class="btn btn--ghost btn--sm header-cta__auth" href="/account">My bookings</a>
             <% if (isAdmin) { %><a class="btn btn--primary btn--sm header-cta__auth" href="/portal">Staff area</a><% } %>
           <% } else { %>
+            <a class="header-account" href="/auth/login" aria-label="Sign in or create an account">
+              <svg class="header-account__icon" width="22" height="22" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                <circle cx="12" cy="8" r="4" fill="none" stroke="currentColor" stroke-width="1.8"></circle>
+                <path d="M4.5 20c1.4-3.4 4.1-5 7.5-5s6.1 1.6 7.5 5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"></path>
+              </svg>
+            </a>
             <a class="btn btn--ghost btn--sm header-cta__auth" href="/auth/login">Sign in</a>
             <a class="btn btn--ghost btn--sm header-cta__auth" href="/auth/login?next=/portal">Staff</a>
           <% } %>
-          <a class="btn btn--sm" href="/book"><span class="btn__label--long">Book an appointment</span><span class="btn__label--short">Book</span></a>
         </div>
       </div>
     </header>

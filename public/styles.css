@@ -245,21 +245,41 @@ li { margin: 0 0 .35em; }
 .header-cta .btn { flex: 1 1 auto; }
 .header-cta .btn--ghost { flex: 0 0 auto; }
 
+/* The account icon is the one header control that never moves into the menu: it
+   is how a customer on a phone reaches their profile in one tap. Booking itself
+   lives in the hero and on every service page, not in this strip. */
+.header-account {
+  display: inline-grid;
+  place-items: center;
+  flex: 0 0 auto;
+  width: var(--tap);
+  height: var(--tap);
+  border-radius: 50%;
+  overflow: hidden;
+  border: 1.5px solid var(--line-strong);
+  background: var(--panel);
+  color: var(--teal-deep);
+  text-decoration: none;
+  transition: background-color .12s ease, border-color .12s ease;
+}
+.header-account:hover { background: var(--teal-soft); border-color: var(--teal); }
+.header-account__img { width: 100%; height: 100%; object-fit: cover; }
+
 /* A sticky header that stacks three rows eats a third of a phone viewport, so
-   below the desktop cursor it collapses to one row. The account links move into
-   the menu panel and the brand and button labels take their short forms; CSS
-   shows exactly one of each pair, so the accessibility tree never doubles up. */
+   below the desktop cursor it collapses to one row. The text links move into the
+   menu panel and the brand takes its short form; CSS shows exactly one of each
+   pair, so the accessibility tree never doubles up. */
 @media (max-width: 959.98px) {
   .site-header__inner { min-height: 60px; gap: .5rem; }
   .brand__name { font-size: 1.05rem; }
-  .brand__tag, .brand__tail, .btn__label--long { display: none; }
+  .brand__tag, .brand__tail { display: none; }
   .nav-toggle { padding: 0 .75rem; }
   .header-cta { width: auto; }
   .header-cta .btn { flex: 0 0 auto; }
   .header-cta .header-cta__auth { display: none; }
 }
 /* At 320px even the short lockup will not share a row with the menu and the
-   booking button, so the wordmark drops to the one word that identifies it. */
+   account icon, so the wordmark drops to the one word that identifies it. */
 @media (max-width: 380px) {
   .brand__name em { display: none; }
 }
@@ -273,7 +293,7 @@ li { margin: 0 0 .35em; }
   .nav__list { display: flex; gap: .15rem; padding: .2rem; border: 1px solid var(--line); border-radius: 999px; background: var(--panel); }
   .nav__link { font-size: .9rem; }
   .nav-toggle { display: none; }
-  .nav__auth, .btn__label--short { display: none; }
+  .nav__auth { display: none; }
   .header-cta { grid-column: 3; grid-row: 1; width: auto; justify-self: end; }
   .header-cta .btn { flex: 0 0 auto; }
 }
@@ -580,6 +600,15 @@ li { margin: 0 0 .35em; }
     margin-top: .85rem;
     box-shadow: none;
   }
+  /* One column, one axis: the portrait is centred instead of parked against the
+     right edge, and the two hero buttons sit under her on the same centre line.
+     The copy between them follows the same axis so the stack reads as one block. */
+  .hero__word { text-align: center; }
+  .hero__media { margin-inline: auto; }
+  .hero__copy { text-align: center; }
+  .hero__actions { justify-content: center; }
+  .hero__lede, .hero__note { margin-inline: auto; }
+  .hero__actions .btn { flex: 0 1 auto; }
 }
 
 /* ---------- hero entrance ------------------------------------------------- */
@@ -754,14 +783,14 @@ li { margin: 0 0 .35em; }
   .sec-head--split h2 { justify-self: start; text-align: left; }
 }
 
-.btn-arrow { border-radius: 12px; padding-right: .55rem; gap: .65rem; }
+.btn-arrow { border-radius: 999px; padding-right: .55rem; gap: .65rem; }
 .btn-arrow .chip {
   flex: none;
   display: grid;
   place-items: center;
   width: 30px;
   height: 30px;
-  border-radius: 9px;
+  border-radius: 999px;
   background: var(--panel);
   color: var(--red-deep);
   font-size: 1rem;
@@ -944,7 +973,7 @@ form .field + .field { margin-top: 1.1rem; }
   box-shadow: 0 0 0 3px var(--teal-soft);
   outline: none;
 }
-.input[aria-invalid="true"], .textarea[aria-invalid="true"] { border-color: var(--err); background: #fffafa; }
+.input[aria-invalid="true"], .textarea[aria-invalid="true"], .select[aria-invalid="true"] { border-color: var(--err); background-color: #fffafa; }
 .textarea { min-height: 120px; resize: vertical; }
 .select { appearance: none; background-image: linear-gradient(45deg, transparent 49%, var(--teal-deep) 50%), linear-gradient(-45deg, transparent 49%, var(--teal-deep) 50%); background-position: right 18px center, right 12px center; background-size: 6px 6px, 6px 6px; background-repeat: no-repeat; padding-right: 2.5rem; }
 
@@ -965,6 +994,107 @@ legend { font-weight: 650; font-size: .95rem; padding: 0; margin-bottom: .6rem; 
 .form-note { font-size: .85rem; color: var(--muted); }
 
 .hp-field { position: absolute; left: -9999px; width: 1px; height: 1px; overflow: hidden; }
+
+/* ---------- profile: photo, completion bar, done tick --------------------- */
+.profile-id { display: flex; align-items: center; gap: 1rem; margin-top: 1.25rem; }
+.avatar { position: relative; flex: none; }
+.avatar__img {
+  width: 72px;
+  height: 72px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  border: 2px solid var(--line-strong);
+  background-color: var(--blush);
+  object-fit: cover;
+  font-family: var(--serif);
+  font-size: 1.5rem;
+  color: var(--teal-deep);
+  overflow: hidden;
+}
+.profile-tick {
+  position: absolute;
+  right: -3px;
+  bottom: -3px;
+  width: 26px;
+  height: 26px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--done);
+  color: #fff;
+  border: 2px solid var(--bg);
+}
+.profile-tick__icon { width: 13px; height: 13px; }
+.profile-id__text { min-width: 0; }
+.profile-id__name { margin: 0; font-family: var(--serif); font-size: 1.35rem; }
+.profile-id__note { margin: .35rem 0 0; font-size: .9rem; color: var(--ink-soft); max-width: 58ch; }
+
+.meter {
+  margin-top: 1.5rem;
+  padding: 1rem 1.1rem 1.15rem;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+}
+.meter__head { display: flex; justify-content: space-between; align-items: baseline; gap: 1rem; }
+.meter__title { margin: 0; font-weight: 650; font-size: .92rem; }
+.meter__percent { margin: 0; font-family: var(--serif); font-size: 1.3rem; color: var(--teal-deep); }
+.meter__track { display: flex; gap: 4px; margin-top: .6rem; }
+.meter__seg { flex: 1 1 0; height: 8px; border-radius: 999px; background: var(--line); transition: background-color .25s ease; }
+.meter__seg.is-done { background: var(--teal); }
+.meter__steps { display: flex; flex-wrap: wrap; gap: .35rem .9rem; margin: .8rem 0 0; padding: 0; list-style: none; }
+.meter__step { display: inline-flex; align-items: center; gap: .35rem; font-size: .85rem; color: var(--muted); }
+.meter__step.is-done { color: var(--ink-soft); }
+.meter__dot { width: 9px; height: 9px; flex: none; border-radius: 50%; border: 1.5px solid var(--line-strong); }
+.meter__step.is-done .meter__dot { background: var(--ok); border-color: var(--ok); }
+
+.field-group-title { margin: 1.9rem 0 .1rem; font-size: 1.05rem; }
+.photo-picker input[type="file"] { padding: .55rem .7rem; font-size: .9rem; background-color: var(--bg-alt); }
+.photo-picker input[type="file"]::file-selector-button {
+  font: inherit;
+  font-weight: 600;
+  color: var(--teal-deep);
+  margin-right: .75rem;
+  padding: .45rem .85rem;
+  border: 1px solid var(--line-strong);
+  border-radius: 999px;
+  background: var(--panel);
+  cursor: pointer;
+}
+.photo-preview {
+  width: 64px;
+  height: 64px;
+  margin-top: .6rem;
+  border-radius: 50%;
+  border: 1.5px solid var(--line-strong);
+  object-fit: cover;
+}
+.photo-state { margin: .4rem 0 0; font-size: .85rem; color: var(--ink-soft); }
+
+/* The show/hide control sits inside the field, over the right edge of the box, so
+   the label stays the only thing above the input and the tap target is never
+   smaller than the text it belongs to. */
+.pw { position: relative; }
+.pw__input { padding-right: 5.6rem; }
+.pw__toggle {
+  position: absolute;
+  top: 50%;
+  right: .45rem;
+  translate: 0 -50%;
+  min-height: 44px;
+  padding: .2rem .75rem;
+  font: inherit;
+  font-size: .8rem;
+  font-weight: 650;
+  color: var(--teal-deep);
+  background: var(--bg-alt);
+  border: 1px solid var(--line-strong);
+  border-radius: 999px;
+  cursor: pointer;
+}
+.pw__toggle:hover { background: var(--teal-soft); }
+.pw__toggle:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
 
 /* ---------- captcha ------------------------------------------------------- */
 .captcha-box {
