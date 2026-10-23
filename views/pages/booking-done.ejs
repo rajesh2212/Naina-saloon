@@ -1,16 +1,29 @@
 <%- include('../partials/head') %>
 
-<section class="section" aria-labelledby="page-title">
+<section class="section section--flower" aria-labelledby="page-title">
+  <%- include('../partials/flower', { pos: 'bl' }) %>
   <div class="wrap wrap--narrow">
-    <div class="card card--accent">
+    <div class="card card--accent done">
       <p class="eyebrow">Request sent</p>
       <h1 id="page-title">The studio has your request</h1>
+
+      <div class="done__ref">
+        <span class="done__ref-label">Reference to quote at the counter</span>
+        <strong>#<%= booking.id %></strong>
+      </div>
+
       <p class="lede">
-        Reference <strong>#<%= booking.id %></strong> — <%= booking.service_name %> on
-        <strong><%= booking.dayLabel %></strong> at <%= booking.timeLabel %>.
+        <%= booking.service_name %> on <strong><%= booking.dayLabel %></strong> at
+        <%= booking.timeLabel %>, held for <%= booking.duration_minutes %> minutes.
       </p>
 
       <p class="pill pill--pending mt-1">Pending — waiting for the studio to confirm</p>
+
+      <p class="alert alert--info mt-2">
+        This is a request, not yet a confirmation. The team reads it at the counter and sets it to
+        <strong>Confirmed</strong>; a ticket to download appears in
+        <a href="/account">My bookings</a> only after that.
+      </p>
 
       <dl class="summary mt-2">
         <dt>Service</dt><dd><%= booking.service_name %></dd>
@@ -23,33 +36,6 @@
         <dt>Your note</dt><dd><%= booking.note || '—' %></dd>
         <dt>Price</dt><dd><%= booking.price_text || 'Confirmed at the studio' %></dd>
       </dl>
-
-      <hr class="rule">
-
-      <h2 class="card__title">What happens next</h2>
-      <ul class="timeline">
-        <li>
-          <strong>Request received</strong> — your slot is held and removed from the public list.
-          <time>Sent <%= dates.formatStamp(booking.created_at) %></time>
-        </li>
-        <li>
-          <strong>Studio confirms</strong> — the team accepts the time at the counter, and your account
-          page changes to <span class="pill pill--confirmed">Confirmed</span>.
-        </li>
-        <li>
-          <strong>If it cannot fit</strong> — the studio marks it declined or calls you to move it, and the
-          time goes back into the diary.
-        </li>
-      </ul>
-
-      <p class="form-note mt-2">
-        <% if (mailEnabled) { %>
-          A copy went to <%= currentUser.email %>. Keep the reference number for the counter.
-        <% } else { %>
-          Email delivery is not configured on this website yet, so keep this page or note the reference
-          number — your account page always shows the live status.
-        <% } %>
-      </p>
 
       <div class="form-actions">
         <a class="btn btn--primary" href="/account">My bookings</a>

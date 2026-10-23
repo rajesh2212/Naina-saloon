@@ -224,7 +224,6 @@ router.get('/done/:id', (req, res) => {
       timeLabel: dates.formatTime12(booking.start_time),
     },
     phone: config.salon.phone,
-    mailEnabled: require('../lib/mailer').mailStatus().enabled,
   });
 });
 
