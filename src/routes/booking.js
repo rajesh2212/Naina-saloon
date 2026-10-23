@@ -13,9 +13,14 @@ const dates = require('../lib/dates');
 const v = require('../lib/validate');
 const { flash } = require('../lib/flash');
 const throttle = require('../lib/auth-rate-limit');
-const { requireUser } = require('../lib/guards');
+const { requireUser, requireProfile } = require('../lib/guards');
 
 const router = express.Router();
+
+// Signing in and a complete profile are checked here, on every request, before
+// any slot list or booking write runs. Hiding the button in the page is a
+// courtesy; this is the rule. Staff logins pass straight through.
+router.use(requireUser, requireProfile);
 
 const today = () => dates.salonClock().date;
 
@@ -114,7 +119,6 @@ router.get('/:serviceId(\\d+)/slots', (req, res) => {
 
 router.post(
   '/',
-  requireUser,
   throttle.throttle({ name: 'booking', max: 12, windowMs: 60 * 60 * 1000 }),
   (req, res) => {
     const serviceId = Number(req.body.service_id);
@@ -205,7 +209,7 @@ function availabilityHasSlot(serviceId, slotId, value) {
   }
 }
 
-router.get('/done/:id', requireUser, (req, res) => {
+router.get('/done/:id', (req, res) => {
   const booking = slots.bookingById(Number(req.params.id));
   if (!booking || booking.user_id !== res.locals.currentUser.id) {
     res.status(404);
