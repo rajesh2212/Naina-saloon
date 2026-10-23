@@ -2,11 +2,14 @@
 /**
  * `npm run check` — reads the configuration, then proves the booking guarantee
  * and the staff portal rules on the live database inside one transaction that is
- * always rolled back, so no test rows survive. The staff-account and
- * site-detail groups afterwards cannot sit in that transaction (bcrypt is
- * async), so they create throwaway rows and delete them again.
+ * always rolled back, so no test rows survive. The staff-account, site-detail and
+ * ticket groups afterwards cannot sit in that transaction (bcrypt and pdf-lib are
+ * async), so they create throwaway rows — and, for tickets, throwaway PDFs — and
+ * delete them again.
  */
 const bcrypt = require('bcryptjs');
+const fs = require('node:fs');
+const path = require('node:path');
 const { config, describeConfig } = require('../src/config');
 const db = require('../src/db');
 const { migrate } = require('../src/db/migrate');
@@ -19,6 +22,7 @@ const records = require('../src/lib/records');
 const guards = require('../src/lib/guards');
 const profileLib = require('../src/lib/profile');
 const uploads = require('../src/lib/uploads');
+const ticket = require('../src/lib/ticket');
 const { digestToken } = require('../src/lib/password');
 
 const results = [];
@@ -571,8 +575,111 @@ try {
     studio.applySalonDetails();
   }
 
+  // ------------------------------------------------------- booking tickets
+  // pdf-lib is async, so this group cannot sit in the rolled-back transaction
+  // above. It makes its own bookings and its own PDF, then deletes both.
+  console.log('\nConfirmed-booking tickets (throwaway rows and files, deleted afterwards)');
+  const ticketStamp = Date.now();
+  const ticketOwner = makeUser(`check-ticket-${ticketStamp}@invalid.example`, 'Ticket Checker');
+  const ticketFiles = [];
+  let ticketBooking = null;
+  try {
+    const service = db.get('SELECT id FROM services WHERE is_bookable = 1 AND is_active = 1 ORDER BY id LIMIT 1');
+    const free = slots.availableSlots(service.id, dates.addDays(dates.salonClock().date, 4)).slots;
+    if (!free.length) throw new Error('no free slot to build a ticket from');
+
+    record(
+      'only a confirmed or served request can carry a ticket',
+      ticket.TICKET_STATUSES.join(',') === 'confirmed,completed',
+      ticket.TICKET_STATUSES.join(', '),
+    );
+
+    ticketBooking = slots.createBooking({
+      userId: ticketOwner.id,
+      serviceId: service.id,
+      slotId: free[0].id,
+      contactName: 'Ticket Checker',
+      contactPhone: '9439712994',
+    });
+    const expected = path.join(ticket.TICKET_DIR, `booking-${ticketBooking.id}.pdf`);
+
+    const whilePending = await ticket.ensure(ticketBooking.id);
+    record(
+      'a pending request is refused a ticket',
+      whilePending.ok === false && whilePending.reason === 'not-confirmed' && !fs.existsSync(expected),
+      whilePending.reason,
+    );
+    let pendingIssue = null;
+    try {
+      await ticket.issue(ticketBooking.id);
+    } catch (error) {
+      pendingIssue = error;
+    }
+    record('…and the staff-side issue call throws rather than writing one', Boolean(pendingIssue), pendingIssue ? pendingIssue.message : 'a PDF was made');
+
+    slots.setBookingStatus({ bookingId: ticketBooking.id, status: 'confirmed', staffNote: 'Desk confirmed' });
+    const first = await ticket.ensure(ticketBooking.id);
+    ticketFiles.push(first.file);
+    const bytes = first.ok ? fs.readFileSync(first.file) : Buffer.alloc(0);
+    record(
+      'a confirmed request writes a real PDF',
+      first.ok === true && bytes.subarray(0, 5).toString() === '%PDF-' && bytes.length > 10_240,
+      `${Math.round(bytes.length / 1024)} KB`,
+    );
+    const stored = db.get('SELECT ticket_path, ticket_issued_at, user_id FROM bookings WHERE id = ?', ticketBooking.id);
+    record(
+      '…and the booking remembers where it lives and when it was issued',
+      stored.ticket_path === first.urlPath && Boolean(stored.ticket_issued_at),
+      `${stored.ticket_path} · ${stored.ticket_issued_at}`,
+    );
+    record(
+      'the row carries the owner, so the download route can check who is asking',
+      stored.user_id === ticketOwner.id && ticket.ticketRow(ticketBooking.id).user_id === ticketOwner.id,
+    );
+    const issuedAt = fs.statSync(first.file).mtimeMs;
+    const again = await ticket.ensure(ticketBooking.id);
+    record(
+      'asking twice serves the same file instead of rewriting it',
+      again.urlPath === first.urlPath && fs.statSync(again.file).mtimeMs === issuedAt,
+    );
+    fs.unlinkSync(first.file);
+    const rebuilt = await ticket.ensure(ticketBooking.id);
+    ticketFiles.push(rebuilt.file);
+    record(
+      'a file deleted from disk is regenerated, so the link never dies',
+      rebuilt.ok === true && fs.existsSync(rebuilt.file) && fs.statSync(rebuilt.file).size > 10_240,
+    );
+
+    slots.setBookingStatus({ bookingId: ticketBooking.id, status: 'cancelled', staffNote: 'Moved by phone' });
+    const afterCancel = await ticket.ensure(ticketBooking.id);
+    record(
+      'a booking taken back after confirming stops offering its ticket',
+      afterCancel.ok === false && afterCancel.reason === 'not-confirmed',
+      afterCancel.reason,
+    );
+
+    const rupee = ticket.safe('₹1,200 — 3:30 pm – 5:00 pm · “bridal” …');
+    record(
+      'the ticket font survives the rupee, the dash and the ellipsis',
+      rupee.includes('Rs') && rupee.includes('-') && [...rupee].every((ch) => ch.charCodeAt(0) <= 255),
+      rupee,
+    );
+  } catch (error) {
+    record('ticket suite ran', false, error.message);
+  } finally {
+    if (ticketBooking) db.run('DELETE FROM bookings WHERE id = ?', ticketBooking.id);
+    for (const file of ticketFiles) {
+      try {
+        fs.unlinkSync(file);
+      } catch {
+        /* already gone */
+      }
+    }
+    db.run('DELETE FROM users WHERE id = ?', ticketOwner.id);
+  }
+
   const after = db.get('SELECT COUNT(*) AS n FROM bookings').n;
-  console.log(`\n  bookings left in the database after rollback: ${after}`);
+  console.log(`\n  bookings left in the database after cleanup: ${after}`);
   db.closeDatabase();
 
   const failed = results.filter((item) => !item.ok);
