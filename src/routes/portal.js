@@ -36,6 +36,7 @@ const NAV = [
   { href: '/portal/services', label: 'Services' },
   { href: '/portal/settings', label: 'Hours & settings' },
   { href: '/portal/details', label: 'Site details' },
+  { href: '/portal/staff', label: 'Staff logins' },
 ];
 
 const STATUS_LABELS = {
@@ -456,6 +457,189 @@ router.post('/details', (req, res) => {
       (problems.length ? `Left as they were: ${problems.join(' ')}` : ''),
   );
   return res.redirect('/portal/details');
+});
+
+// -------------------------------------------------------------- staff logins
+/**
+ * Staff accounts, managed by a staff account. This replaces the terminal-only
+ * rule the portal used to state: creating a login here still requires an
+ * already-authenticated admin plus a valid CSRF token, so it is not a route an
+ * outsider can walk up to — but the studio no longer needs shell access to hand
+ * the diary to a second person.
+ */
+router.get('/staff', (req, res) => {
+  const staff = users.listStaff().map((row) => ({
+    ...row,
+    joinedLabel: dates.formatStamp(row.created_at),
+    signedInLabel: row.last_login_at ? dates.formatStamp(row.last_login_at) : null,
+    signedInIso: row.last_login_at ? dates.stampToIso(row.last_login_at) : null,
+  }));
+  return res.render('portal/staff', {
+    title: 'Staff logins',
+    view: 'staff',
+    staff,
+    accountTotal: users.count(),
+    activeAdmins: users.countAdmins(),
+    selfId: res.locals.currentUser ? res.locals.currentUser.id : null,
+  });
+});
+
+function staffOrNull(req, res, id) {
+  const target = users.findById(id);
+  if (!target || target.role !== 'admin') {
+    flash.error(req, 'There is no staff login with that number. It may have been removed.');
+    return null;
+  }
+  return target;
+}
+
+/** True when removing this account's access would leave the portal shut for everyone. */
+function isLastActiveAdmin(target) {
+  return target.role === 'admin' && target.is_active && users.countAdmins() <= 1;
+}
+
+router.post('/staff', async (req, res, next) => {
+  const email = v.normalizeEmail(req.body.email);
+  const name = v.normalizeText(req.body.name, 80) || 'Salon team';
+  const password = String(req.body.password || '');
+
+  const problems = [];
+  if (!email) problems.push('Enter the email address this person will sign in with.');
+  else if (v.emailError(email)) problems.push(v.emailError(email));
+  if (password) {
+    const error = v.passwordError(password, { email, name });
+    if (error) problems.push(`The staff password — ${error}`);
+  }
+  if (problems.length) {
+    flash.error(req, problems.join(' '));
+    return res.redirect('/portal/staff');
+  }
+
+  const self = res.locals.currentUser;
+  const existing = email ? users.findByEmail(email) : null;
+
+  try {
+    if (existing && existing.role === 'admin') {
+      flash.info(req, `${email} is already a staff login. Nothing was changed.`);
+      return res.redirect('/portal/staff');
+    }
+
+    if (existing && !password) {
+      // Promote the account the way the terminal script does: the person keeps
+      // the password they already chose, so no secret is invented here.
+      const outcome = await users.promote(email, name, null);
+      flash.success(
+        req,
+        `${outcome.user.email} is now a staff login and still signs in with the password they already had. ` +
+          'Use “Set a new password” on their row if you wanted to change it.',
+      );
+      return res.redirect('/portal/staff');
+    }
+
+    if (existing && self && existing.id === self.id) {
+      flash.error(req, 'That is your own login. Change your password from your account page, not from here.');
+      return res.redirect('/portal/staff');
+    }
+
+    if (existing) {
+      await users.changePassword(existing.id, password);
+      const outcome = await users.promote(email, name, null);
+      flash.success(
+        req,
+        `${outcome.user.email} is a staff login with the new password set. Every other device signed in as them ` +
+          'was signed out, and their outstanding reset links were dropped.',
+      );
+      return res.redirect('/portal/staff');
+    }
+
+    if (!password) {
+      flash.error(req, `No account exists for ${email} yet, so the new staff login needs a password ` +
+        '— at least 10 characters, with a letter and a number.');
+      return res.redirect('/portal/staff');
+    }
+
+    const created = await users.createStaff({ email, name, password });
+    flash.success(
+      req,
+      `Staff login #${created.id} made for ${created.email}. They sign in at the same address as a customer ` +
+        'and the portal opens for them straight away.',
+    );
+    return res.redirect('/portal/staff');
+  } catch (error) {
+    if (error && error.status && error.status < 500) {
+      flash.error(req, error.message);
+      return res.redirect('/portal/staff');
+    }
+    return next(error);
+  }
+});
+
+router.post('/staff/:id(\\d+)/password', async (req, res, next) => {
+  const target = staffOrNull(req, res, Number(req.params.id));
+  if (!target) return res.redirect('/portal/staff');
+  const self = res.locals.currentUser;
+  if (self && self.id === target.id) {
+    flash.error(req, 'That is your own login — change it from your account page so you stay signed in.');
+    return res.redirect('/portal/staff');
+  }
+  const password = String(req.body.password || '');
+  const error = v.passwordError(password, { email: target.email, name: target.name });
+  if (error) {
+    flash.error(req, `The password was not changed. ${error}`);
+    return res.redirect('/portal/staff');
+  }
+  try {
+    await users.changePassword(target.id, password);
+    flash.success(req, `A new password is set for ${target.email}. Hand it over and ask them to sign in again.`);
+  } catch (inner) {
+    return next(inner);
+  }
+  return res.redirect('/portal/staff');
+});
+
+router.post('/staff/:id(\\d+)/active', (req, res) => {
+  const target = staffOrNull(req, res, Number(req.params.id));
+  if (!target) return res.redirect('/portal/staff');
+  const self = res.locals.currentUser;
+  const turningOff = target.is_active === 1;
+
+  if (turningOff && self && self.id === target.id) {
+    flash.error(req, 'You cannot deactivate the login you are using — that would close the portal on you mid-shift.');
+    return res.redirect('/portal/staff');
+  }
+  if (turningOff && isLastActiveAdmin(target)) {
+    flash.error(req, 'This is the last working staff login. Nobody would be left who can open the diary, so it stays active.');
+    return res.redirect('/portal/staff');
+  }
+
+  const updated = users.setActive(target.id, !turningOff);
+  flash.success(
+    req,
+    turningOff
+      ? `${updated.email} can no longer sign in, and the sessions they had open were dropped. Their bookings and account history stay in the diary.`
+      : `${updated.email} can sign in again as staff. They will need to log in afresh.`,
+  );
+  return res.redirect('/portal/staff');
+});
+
+router.post('/staff/:id(\\d+)/role', (req, res) => {
+  const target = staffOrNull(req, res, Number(req.params.id));
+  if (!target) return res.redirect('/portal/staff');
+  const self = res.locals.currentUser;
+  if (self && self.id === target.id) {
+    flash.error(req, 'You cannot take your own staff role off — that would lock you out of this page.');
+    return res.redirect('/portal/staff');
+  }
+  if (isLastActiveAdmin(target)) {
+    flash.error(req, 'This is the last working staff login, so it cannot be turned back into a customer account.');
+    return res.redirect('/portal/staff');
+  }
+  const updated = users.setRole(target.id, 'customer');
+  flash.success(
+    req,
+    `${updated.email} is a customer account again and was signed out of the portal. Their bookings are still in the diary.`,
+  );
+  return res.redirect('/portal/staff');
 });
 
 module.exports = router;

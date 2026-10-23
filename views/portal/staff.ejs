@@ -1,0 +1,172 @@
+<%- include('partials/head') %>
+
+<%
+  var otherActive = activeAdmins - 1;
+%>
+
+<div class="p-head">
+  <div>
+    <p class="p-eyebrow"><%= staff.length %> staff login<%= staff.length === 1 ? '' : 's' %> · <%= accountTotal %> account<%= accountTotal === 1 ? '' : 's' %> in total</p>
+    <h1>Staff logins</h1>
+    <p>
+      Who can open this portal. Every account on the website &mdash; customer and staff &mdash; is in the same database
+      and the full roster is under <a href="/portal/customers">Customers</a>. Passwords are never shown or stored in
+      plain text here: a new one is hashed the moment it arrives, and the hash is written straight out of the page.
+    </p>
+  </div>
+  <div class="p-actions">
+    <a class="btn btn--primary" href="/portal/customers?filter=staff">Staff in the roster</a>
+    <a class="btn" href="/portal/customers">All accounts</a>
+  </div>
+</div>
+
+<section class="p-card p-card--accent" aria-labelledby="make-staff">
+  <h2 id="make-staff" class="p-card__title">Give someone the portal</h2>
+  <form method="post" action="/portal/staff" data-guarded>
+    <%- csrfField() %>
+    <div class="p-filtergrid">
+      <div class="p-field">
+        <label for="email">Their email address <span class="p-tag">required</span></label>
+        <input id="email" name="email" type="email" required maxlength="160" autocomplete="off">
+        <p class="p-hint">The address they will sign in with &mdash; the same login page customers use.</p>
+      </div>
+      <div class="p-field">
+        <label for="name">Name shown in the portal <span class="p-optional">optional</span></label>
+        <input id="name" name="name" type="text" maxlength="80" autocomplete="off" placeholder="Salon team">
+        <p class="p-hint">Only used if this email does not have an account yet.</p>
+      </div>
+      <div class="p-field">
+        <label for="password">Password <span class="p-optional">see the two cases below</span></label>
+        <input id="password" name="password" type="password" maxlength="200" autocomplete="new-password">
+        <p class="p-hint">At least 10 characters, with a letter and a number.</p>
+      </div>
+    </div>
+    <div class="p-form-actions">
+      <button class="btn btn--primary" type="submit">Make a staff login</button>
+      <span class="p-loading" aria-hidden="true"><span class="p-spin"></span> Saving</span>
+    </div>
+    <p class="p-hint">
+      Two different things happen, and the page tells you which one it did. If the address has no account yet, one is
+      created with the password you typed. If it <em>already</em> has a customer account, it is promoted and keeps the
+      password that person chose &mdash; leave the box empty for that. Fill the box in and you are also resetting their
+      password, which signs out every device they had open.
+    </p>
+  </form>
+</section>
+
+<% if (!staff.length) { %>
+  <p class="p-empty">
+    <strong>No staff logins.</strong>
+    You are signed in, so this list should not be empty &mdash; make one above and check the message it gives back.
+  </p>
+<% } else { %>
+  <div class="p-table-wrap p-table-wrap--stack">
+    <table>
+      <caption>
+        Staff accounts and what they can do. Last sign-in is on <%= portalZone %>; the row marked
+        &ldquo;you&rdquo; is the login you are using.
+      </caption>
+      <thead>
+        <tr>
+          <th scope="col">Staff member</th>
+          <th scope="col">Access</th>
+          <th scope="col">Last sign-in</th>
+          <th scope="col">Since</th>
+          <th scope="col">Manage</th>
+        </tr>
+      </thead>
+      <tbody>
+        <% staff.forEach(function (row) { %>
+          <tr>
+            <th scope="row" data-col="Staff member">
+              <a href="/portal/customers/<%= row.id %>"><%= row.name %></a>
+              <span class="p-sub">#<%= row.id %> · <%= row.email %></span>
+            </th>
+            <td data-col="Access">
+              <% if (row.is_active) { %><span class="p-pill p-pill--confirmed">active</span><% } else { %><span class="p-pill p-pill--cancelled">deactivated</span><% } %>
+              <% if (row.id === selfId) { %><span class="p-tag p-tag--today">you</span><% } %>
+            </td>
+            <td data-col="Last sign-in">
+              <% if (row.signedInLabel) { %>
+                <time class="p-time" data-iso="<%= row.signedInIso %>" datetime="<%= row.signedInIso %>"><%= row.signedInLabel %></time>
+              <% } else { %>
+                <span class="p-tag p-tag--past">never</span>
+              <% } %>
+            </td>
+            <td data-col="Since"><%= row.joinedLabel %></td>
+            <td data-col="Manage">
+              <details class="p-acc">
+                <summary>Change password</summary>
+                <form method="post" action="/portal/staff/<%= row.id %>/password" class="p-row-form" data-guarded>
+                  <%- csrfField() %>
+                  <label class="sr-only" for="pw-<%= row.id %>">New password for <%= row.email %></label>
+                  <input id="pw-<%= row.id %>" name="password" type="password" maxlength="200"
+                         autocomplete="new-password" placeholder="10+ characters, letter + number">
+                  <button class="btn btn--sm" type="submit">Set it</button>
+                </form>
+              </details>
+
+              <form method="post" action="/portal/staff/<%= row.id %>/active" class="p-row-form" data-guarded>
+                <%- csrfField() %>
+                <% if (row.is_active) { %>
+                  <button class="btn btn--sm btn--danger" type="submit"
+                          <%= row.id === selfId || (activeAdmins <= 1) ? 'disabled' : '' %>>Deactivate</button>
+                <% } else { %>
+                  <button class="btn btn--sm btn--primary" type="submit">Allow sign-in again</button>
+                <% } %>
+              </form>
+
+              <form method="post" action="/portal/staff/<%= row.id %>/role" class="p-row-form" data-guarded>
+                <%- csrfField() %>
+                <button class="btn btn--sm" type="submit"
+                        <%= row.id === selfId || (activeAdmins <= 1) ? 'disabled' : '' %>>Make them a customer again</button>
+              </form>
+            </td>
+          </tr>
+        <% }) %>
+      </tbody>
+    </table>
+  </div>
+<% } %>
+
+<section class="p-card p-card--flat" aria-labelledby="limits">
+  <h2 id="limits" class="p-card__title">What this screen will not let you do</h2>
+  <ul class="p-list">
+    <li>
+      <span class="p-hour">You</span>
+      <p>
+        Your own row cannot be deactivated or demoted from the inside, and its password is not settable here. Those
+        three actions would close the portal on the session making them, so use
+        <a href="/account">your account page</a> to change your own password.
+      </p>
+    </li>
+    <li>
+      <span class="p-hour">Last one</span>
+      <p>
+        <% if (otherActive > 0) { %>
+          There are <%= activeAdmins %> working staff logins, so removing one still leaves someone in the diary.
+        <% } else { %>
+          This is the only working staff login. The buttons that would remove it are disabled &mdash; make a second one
+          first, then take the first one away. A studio with no staff account cannot confirm a single booking.
+        <% } %>
+      </p>
+    </li>
+    <li>
+      <span class="p-hour">Server-side</span>
+      <p>
+        A disabled button is a courtesy, not the control. Each of these routes is behind the same admin guard as the
+        rest of the portal, needs a valid CSRF token, and re-reads your role from the database &mdash; POSTing here
+        with a customer session gets a 403 that names no account at all.
+      </p>
+    </li>
+    <li>
+      <span class="p-hour">Losing access</span>
+      <p>
+        Deactivating or demoting drops that person&rsquo;s open sessions and outstanding reset links immediately, so a
+        signed-in tab stops working the moment the change is saved. Their bookings and history are untouched.
+      </p>
+    </li>
+  </ul>
+</section>
+
+<%- include('partials/foot') %>
