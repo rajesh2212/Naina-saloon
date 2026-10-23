@@ -138,6 +138,83 @@
     });
   }
 
+  // -------------------------------------------- booking: the step panel
+  // The page renders its second half inside a <dialog open>, which without JS is
+  // just a card further down the page. Here it is closed and re-opened modally so
+  // it sits centred over a scrim, and the top-left control walks back through the
+  // steps — details to times, times to the service and date behind it. Nothing is
+  // re-fetched on the way back, so every choice the visitor made stays where it was.
+  var panel = doc.querySelector('[data-step-panel]');
+  var panelBack = doc.querySelector('[data-panel-back]');
+  var detailsStep = doc.querySelector('[data-panel-step="details"]');
+  var panelWhere = doc.querySelector('[data-panel-where]');
+  var pickedNote = doc.querySelector('[data-panel-picked]');
+  var pickedNoteText = pickedNote ? pickedNote.textContent.trim() : '';
+  var backLabel = doc.querySelector('[data-panel-back-label]');
+  var atTimes = true;
+  // A re-rendered form that already has errors must keep its details open; the
+  // server says so with data-shown. Otherwise step four waits for a time.
+  var keepDetailsOpen = !detailsStep || detailsStep.getAttribute('data-shown') === 'true';
+
+  function setPanelWhere(text) {
+    if (!panelWhere) return;
+    if (text) panelWhere.textContent = text;
+  }
+
+  function showDetails(show) {
+    atTimes = !show;
+    if (!detailsStep) return;
+    detailsStep.hidden = !show;
+    if (backLabel) backLabel.textContent = show ? 'Choose another time' : 'Back';
+  }
+
+  function revealFor(chosen) {
+    if (keepDetailsOpen) return;
+    showDetails(Boolean(chosen));
+    var time = chosen ? (chosen.getAttribute('data-start') || '') : '';
+    setPanelWhere(chosen ? 'Time chosen: ' + time : null);
+    if (pickedNote) pickedNote.textContent = chosen
+      ? time + ' is held for you as a request — the studio calls to confirm it.'
+      : pickedNoteText;
+  }
+
+  if (panel) {
+    panel.setAttribute('data-modal', 'true');
+    if (panel.open) panel.close();
+    panel.showModal();
+    // The dialog itself, not the Back button: opening the sheet should not leave
+    // the first thing in it one Enter key away from closing it again.
+    panel.focus({ preventScroll: true });
+    if (panelWhere) panelWhere.setAttribute('data-day', panelWhere.textContent);
+    // Nothing is pre-selected when the sheet opens, so the only reason to show
+    // step four straight away is a form the server sent back with errors.
+    showDetails(keepDetailsOpen);
+  }
+
+  if (panelBack && panel) {
+    panelBack.addEventListener('click', function (event) {
+      event.preventDefault();
+      if (!atTimes) {
+        showDetails(false);
+        setPanelWhere(panelWhere ? panelWhere.getAttribute('data-day') : null);
+        var times = doc.querySelector('#step-3');
+        if (times) times.scrollIntoView({ block: 'center' });
+        var firstRadio = slotsForm ? slotsForm.querySelector('input[name="slot_id"]') : null;
+        if (firstRadio) firstRadio.focus();
+        return;
+      }
+      // Back to step one: the panel closes and the service and date the form
+      // already holds stay filled in behind it.
+      panel.close();
+      var serviceSelect = doc.querySelector('#service');
+      if (serviceSelect) {
+        serviceSelect.focus();
+        var step1 = doc.querySelector('#step-1');
+        if (step1) step1.scrollIntoView({ block: 'center' });
+      }
+    });
+  }
+
   // ------------------------------------------------- booking: slot loading
   var slotsForm = doc.querySelector('[data-slots-form]');
   if (slotsForm) {
@@ -217,12 +294,16 @@
             return;
           }
           renderSlots(result.body.slots || [], result.body.durationMinutes);
+          var count = (result.body.slots || []).length;
+          var freeCount = doc.querySelector('[data-free-count]');
+          if (freeCount) freeCount.textContent = String(count);
+          revealFor(null);
           if (!result.body.slots || !result.body.slots.length) {
             setStatus(result.body.notice || 'No free times left on that date.');
             return;
           }
           setStatus(
-            (result.body.slots.length === 1 ? '1 free time' : result.body.slots.length + ' free times') +
+            (count === 1 ? '1 free time' : count + ' free times') +
               ' on ' + (result.body.dayLabel || '') + '. Choose one.',
           );
         })
@@ -266,6 +347,7 @@
           var hint = confirmButton.querySelector('[data-selection-hint]');
           if (hint) hint.textContent = '— ' + (chosen.getAttribute('data-start') || '') + ' chosen';
         }
+        revealFor(chosen);
       };
       slotsForm.addEventListener('change', sync);
       sync();
@@ -303,15 +385,38 @@
   }
 
   // ------------------------------------------------ double-submit protection
+  // The submit button is really disabled once a request is on its way, so a
+  // second click or a held Enter key cannot send the same slot twice. The server
+  // still has the final say: a duplicate hits the one-active-booking-per-slot
+  // index and comes back as a conflict, not as a second booking.
   doc.querySelectorAll('form[data-once]').forEach(function (form) {
-    form.addEventListener('submit', function () {
+    var sending = false;
+    form.addEventListener('submit', function (event) {
+      if (sending) {
+        event.preventDefault();
+        return;
+      }
+      sending = true;
       var button = form.querySelector('button[type="submit"]');
       if (!button) return;
       window.setTimeout(function () {
+        button.disabled = true;
         button.setAttribute('aria-disabled', 'true');
-        button.classList.add('btn');
         button.dataset.sending = 'true';
       }, 0);
+    });
+    // A form the server sent back with errors is still this same page: let the
+    // visitor fix it and try again rather than leaving it locked.
+    window.addEventListener('pageshow', function (event) {
+      if (event.persisted) {
+        sending = false;
+        var retry = form.querySelector('button[type="submit"]');
+        if (retry) {
+          retry.disabled = false;
+          retry.removeAttribute('aria-disabled');
+          delete retry.dataset.sending;
+        }
+      }
     });
   });
 })();

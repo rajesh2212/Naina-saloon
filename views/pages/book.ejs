@@ -19,7 +19,8 @@
     : encodeURIComponent('/book');
 %>
 
-<section class="section" aria-labelledby="page-title">
+<section class="section section--flower" aria-labelledby="page-title">
+  <%- include('../partials/flower', { pos: 'tr' }) %>
   <div class="wrap">
     <p class="eyebrow">Appointments</p>
     <h1 id="page-title"><%= showStep === 1 ? 'Book an appointment' : service.name %></h1>
@@ -75,7 +76,26 @@
 </section>
 
 <% if (service) { %>
-  <section class="section" aria-labelledby="step-2">
+  <%#
+    One <dialog> holds every step after the service is chosen. It is rendered
+    with `open`, so without JavaScript it is simply the next card on the page and
+    the form below posts exactly as it always did. main.js closes it, marks it
+    `data-modal` and re-opens it with showModal(), which is what turns it into the
+    centred sheet over a scrim. The back control is a real link to /book for the
+    no-JS case and is intercepted when scripting is on.
+  %>
+  <dialog class="steppanel" id="slot-panel" data-step-panel open aria-labelledby="step-2">
+    <div class="steppanel__bar">
+      <a class="steppanel__back" href="/book" data-panel-back>
+        <svg class="icon" aria-hidden="true" viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        <span data-panel-back-label>Back</span>
+      </a>
+      <p class="steppanel__where">
+        <strong><%= service.name %></strong>
+        <span class="small" data-panel-where><%= dates.formatLongDate(picked) %></span>
+      </p>
+    </div>
+
     <div class="wrap booking-layout">
       <div>
         <h2 id="step-2">2. Pick a day</h2>
@@ -97,7 +117,7 @@
           <% }) %>
         </div>
 
-        <h2 class="mt-3">3. Choose a time — <span data-selected-day><%= dates.formatShortDate(picked) %></span></h2>
+        <h2 class="mt-3" id="step-3">3. Choose a time — <span data-selected-day><%= dates.formatShortDate(picked) %></span></h2>
 
         <form method="post" action="/book" data-slots-form
               data-slots-endpoint="/book/<%= service.id %>/slots" data-once>
@@ -135,55 +155,63 @@
 
           <% if (errs.slot) { %><p class="error" role="alert"><%= errs.slot %></p><% } %>
 
-          <div class="grid grid--2 mt-3">
-            <div class="field">
-              <label for="contact_phone">Number the studio can call</label>
-              <input class="input" id="contact_phone" name="contact_phone" type="tel" inputmode="tel"
-                     autocomplete="tel" required maxlength="20" value="<%= vals.contactPhone || '' %>"
-                     aria-describedby="phone-hint<%= errs.phone ? ' phone-error' : '' %>"
-                     <% if (errs.phone) { %>aria-invalid="true"<% } %>>
-              <% if (errs.phone) { %><p class="error" id="phone-error"><%= errs.phone %></p><% } %>
-              <p class="hint" id="phone-hint">Kept on the booking so the counter can confirm or reschedule.</p>
+          <div class="steppanel__step" data-panel-step="details"
+               data-shown="<%= (errs.phone || errs.note || errs.slot || errs.form) ? 'true' : 'false' %>">
+            <h2 class="mt-3" id="step-4">4. Your details</h2>
+            <p class="muted small" data-panel-picked>
+              <% if (avail.slots.length) { %>Choose a time above and the studio will call to confirm it.<% } %>
+            </p>
+
+            <div class="grid grid--2 mt-1">
+              <div class="field">
+                <label for="contact_phone">Number the studio can call</label>
+                <input class="input" id="contact_phone" name="contact_phone" type="tel" inputmode="tel"
+                       autocomplete="tel" required maxlength="20" value="<%= vals.contactPhone || '' %>"
+                       aria-describedby="phone-hint<%= errs.phone ? ' phone-error' : '' %>"
+                       <% if (errs.phone) { %>aria-invalid="true"<% } %>>
+                <% if (errs.phone) { %><p class="error" id="phone-error"><%= errs.phone %></p><% } %>
+                <p class="hint" id="phone-hint">Kept on the booking so the counter can confirm or reschedule.</p>
+              </div>
+
+              <div class="field">
+                <label for="preferred_title">What should we call you? <span class="optional">(optional)</span></label>
+                <input class="input" id="preferred_title" name="preferred_title" type="text" maxlength="24"
+                       autocomplete="nickname" placeholder="Ms., Mr., Mx., or blank"
+                       value="<%= vals.preferredTitle || '' %>">
+                <p class="hint">You are never asked for your gender.</p>
+              </div>
+
+              <div class="field span-all">
+                <label for="note">Anything the studio should know <span class="optional">(optional)</span></label>
+                <textarea class="textarea" id="note" name="note" rows="3" maxlength="500"
+                          placeholder="Which function it is for, hair length, travelling with family…"><%= vals.note || '' %></textarea>
+                <% if (errs.note) { %><p class="error"><%= errs.note %></p><% } %>
+              </div>
             </div>
 
-            <div class="field">
-              <label for="preferred_title">What should we call you? <span class="optional">(optional)</span></label>
-              <input class="input" id="preferred_title" name="preferred_title" type="text" maxlength="24"
-                     autocomplete="nickname" placeholder="Ms., Mr., Mx., or blank"
-                     value="<%= vals.preferredTitle || '' %>">
-              <p class="hint">You are never asked for your gender.</p>
+            <div class="form-actions">
+              <% if (needSignIn) { %>
+                <p class="alert alert--info w-full">
+                  <strong>Sign in to send the request.</strong>
+                  <span class="small">You have reached the last step — accounts are free and take about a minute.</span>
+                </p>
+                <a class="btn" href="/auth/login?next=<%= signInNext %>">Sign in and continue</a>
+                <a class="btn btn--ghost" href="/auth/register?next=<%= signInNext %>">Create an account</a>
+              <% } else { %>
+                <button class="btn" type="submit" data-confirm-button disabled>
+                  Request this slot <span class="btn__hint" data-selection-hint></span>
+                </button>
+                <a class="btn btn--ghost" href="/services">Change service</a>
+              <% } %>
             </div>
 
-            <div class="field span-all">
-              <label for="note">Anything the studio should know <span class="optional">(optional)</span></label>
-              <textarea class="textarea" id="note" name="note" rows="3" maxlength="500"
-                        placeholder="Which function it is for, hair length, travelling with family…"><%= vals.note || '' %></textarea>
-              <% if (errs.note) { %><p class="error"><%= errs.note %></p><% } %>
-            </div>
-          </div>
-
-          <div class="form-actions">
-            <% if (needSignIn) { %>
-              <p class="alert alert--info w-full">
-                <strong>Sign in to send the request.</strong>
-                <span class="small">You have reached the last step — accounts are free and take about a minute.</span>
+            <% if (!needSignIn) { %>
+              <p class="form-note">
+                Sending this holds the time as a <strong>pending</strong> request. The studio confirms it from
+                the counter, and you can cancel from your account — which frees the slot again.
               </p>
-              <a class="btn" href="/auth/login?next=<%= signInNext %>">Sign in and continue</a>
-              <a class="btn btn--ghost" href="/auth/register?next=<%= signInNext %>">Create an account</a>
-            <% } else { %>
-              <button class="btn" type="submit" data-confirm-button disabled>
-                Request this slot <span class="btn__hint" data-selection-hint></span>
-              </button>
-              <a class="btn btn--ghost" href="/services">Change service</a>
             <% } %>
           </div>
-
-          <% if (!needSignIn) { %>
-            <p class="form-note">
-              Sending this holds the time as a <strong>pending</strong> request. The studio confirms it from
-              the counter, and you can cancel from your account — which frees the slot again.
-            </p>
-          <% } %>
         </form>
       </div>
 
@@ -194,7 +222,7 @@
           <dt>Group</dt><dd><%= service.category_name %></dd>
           <dt>Chair time</dt><dd><%= service.duration_minutes %> min</dd>
           <dt>Day</dt><dd><%= dates.formatLongDate(picked) %></dd>
-          <dt>Free times</dt><dd><%= avail.slots.length %></dd>
+          <dt>Free times</dt><dd data-free-count><%= avail.slots.length %></dd>
           <dt>Price</dt><dd><%= service.price_text || 'At the studio' %></dd>
           <dt>Payment</dt><dd>None online</dd>
         </dl>
@@ -210,7 +238,7 @@
         </p>
       </aside>
     </div>
-  </section>
+  </dialog>
 <% } else { %>
   <section class="section" aria-labelledby="browse-title">
     <div class="wrap">
