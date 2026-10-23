@@ -16,6 +16,7 @@
     "db:setup": "npm run db:migrate && npm run db:seed",
     "create-admin": "node --no-warnings scripts/create-admin.js",
     "slots:generate": "node --no-warnings scripts/generate-slots.js",
+    "art:ticket": "node --no-warnings scripts/ticket-art.js",
     "check": "node --no-warnings scripts/check.js"
   },
   "dependencies": {
@@ -26,6 +27,7 @@
     "express-session": "^1.18.1",
     "helmet": "^8.1.0",
     "nodemailer": "^6.10.1",
+    "pdf-lib": "^1.17.1",
     "svg-captcha": "^1.4.0"
   }
 }
