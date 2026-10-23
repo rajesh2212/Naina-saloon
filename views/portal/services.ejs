@@ -1,0 +1,109 @@
+<%- include('partials/head') %>
+
+<div class="p-head">
+  <div>
+    <p class="p-eyebrow"><%= groups.length %> groups on the website</p>
+    <h1>Services</h1>
+    <p>
+      What customers can choose on the booking form. Chair time is real scheduling data: it decides which slots a
+      service can still finish inside the studio&rsquo;s hours, so a longer time can make late afternoons unbookable.
+      Names, prices and descriptions here are the ones already on the website — nothing is invented for you.
+    </p>
+  </div>
+  <div class="p-actions">
+    <a class="btn btn--primary" href="/portal/settings">Opening hours</a>
+    <a class="btn" href="/services">See the customer list</a>
+  </div>
+</div>
+
+<p class="p-note">
+  Slot spacing is currently <strong>every <%= rules.stepMinutes %> minutes</strong>, dates published
+  <strong><%= rules.horizonDays %> days ahead</strong>, same-day bookings need
+  <strong><%= rules.leadMinutes %> minutes notice</strong>. All of that is editable on the
+  <a href="/portal/settings">Hours &amp; settings</a> page.
+</p>
+
+<% groups.forEach(function (group) { %>
+  <section class="p-card" aria-labelledby="g<%= group.id %>">
+    <div class="p-head p-head--tight">
+      <div>
+        <h2 id="g<%= group.id %>" class="p-card__title">
+          <%= group.name %>
+          <% if (!group.is_active) { %><span class="p-tag p-tag--past">hidden from the website</span><% } %>
+        </h2>
+        <p class="p-hint"><%= group.summary || 'No summary written.' %> · <code><%= group.slug %></code> ·
+          <%= group.services.length %> service<%= group.services.length === 1 ? '' : 's' %></p>
+      </div>
+      <form method="post" action="/portal/categories/<%= group.id %>/toggle" data-guarded>
+        <%- csrfField() %>
+        <input type="hidden" name="back" value="/portal/services">
+        <button class="btn btn--sm" type="submit"><%= group.is_active ? 'Hide this group' : 'Show this group' %></button>
+      </form>
+    </div>
+
+    <% if (!group.services.length) { %>
+      <p class="p-empty"><strong>Nothing in this group.</strong>A customer sees the heading with no choices under it —
+        hide the group or add a service in the database.</p>
+    <% } else { %>
+      <ul class="p-acc">
+        <% group.services.forEach(function (service) { %>
+          <li>
+            <details>
+              <summary>
+                <strong><%= service.name %></strong>
+                <span class="p-tag"><%= service.duration_minutes %> min</span>
+                <% if (!service.is_bookable) { %><span class="p-tag p-tag--past">not bookable</span><% } %>
+                <% if (!service.is_active) { %><span class="p-tag p-tag--past">hidden</span><% } %>
+                <span class="p-sub"><%= service.booking_count %> booking<%= service.booking_count === 1 ? '' : 's' %> on record</span>
+              </summary>
+
+              <form method="post" action="/portal/services/<%= service.id %>" class="p-card p-card--flat" data-guarded>
+                <%- csrfField() %>
+                <div class="p-field">
+                  <label for="name-<%= service.id %>">Name</label>
+                  <input id="name-<%= service.id %>" name="name" type="text" required maxlength="80" value="<%= service.name %>">
+                </div>
+                <div class="p-filtergrid">
+                  <div class="p-field">
+                    <label for="dur-<%= service.id %>">Chair time, minutes</label>
+                    <input id="dur-<%= service.id %>" name="duration_minutes" type="number" min="15" max="480" step="5"
+                           required value="<%= service.duration_minutes %>">
+                    <p class="p-hint">Between 15 and 480.</p>
+                  </div>
+                  <div class="p-field">
+                    <label for="price-<%= service.id %>">Price <span class="p-optional">as written text</span></label>
+                    <input id="price-<%= service.id %>" name="price_text" type="text" maxlength="60"
+                           value="<%= service.price_text || '' %>" placeholder="Leave blank for &ldquo;ask at the desk&rdquo;">
+                    <p class="p-hint">Displayed, never charged. No payment is taken anywhere on this site.</p>
+                  </div>
+                </div>
+                <div class="p-field">
+                  <label for="desc-<%= service.id %>">Description</label>
+                  <textarea id="desc-<%= service.id %>" name="description" rows="2" maxlength="400"><%= service.description || '' %></textarea>
+                </div>
+                <p class="p-check">
+                  <input id="book-<%= service.id %>" name="is_bookable" type="checkbox" value="1"
+                         <%= service.is_bookable ? 'checked' : '' %>>
+                  <label for="book-<%= service.id %>">Can be booked online</label>
+                </p>
+                <div class="p-form-actions">
+                  <button class="btn btn--primary btn--sm" type="submit">Save this service</button>
+                  <a class="btn btn--sm" href="/category/<%= group.slug %>">Where it appears</a>
+                  <span class="p-loading" aria-hidden="true"><span class="p-spin"></span> Saving</span>
+                </div>
+              </form>
+
+              <form method="post" action="/portal/services/<%= service.id %>/toggle" class="p-row-form" data-guarded>
+                <%- csrfField() %>
+                <button class="btn btn--sm" type="submit">
+                  <%= service.is_active ? 'Hide from the website' : 'List on the website' %>
+                </button>
+              </form>
+            </li>
+          <% }) %>
+      </ul>
+    <% } %>
+  </section>
+<% }) %>
+
+<%- include('partials/foot') %>

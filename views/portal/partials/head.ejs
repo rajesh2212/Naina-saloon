@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="en" data-salon-zone="<%= dates.salonZone() %>">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title><%= title %> · Staff portal · <%= salon.name %></title>
+    <%# Customer and booking data lives behind this page. Never index it, and
+        never let a shared link leak further than the session already does. %>
+    <meta name="robots" content="noindex, nofollow, noarchive">
+    <meta name="color-scheme" content="light">
+    <link rel="icon" href="/favicon.svg">
+    <link rel="stylesheet" href="/portal.css?v=<%= portalCssVersion %>">
+    <script src="/portal.js" defer></script>
+  </head>
+  <body>
+    <a class="skip" href="#p-main">Skip to main content</a>
+
+    <%
+      var clock = portalClock;
+      var path = currentPath || '/portal';
+      function navCurrent(href) {
+        if (href === '/portal') return path === '/portal' ? 'page' : 'false';
+        return path.indexOf(href) === 0 ? 'page' : 'false';
+      }
+      var navCounts = {
+        '/portal': null,
+        '/portal/bookings': portalStatusCounts.pending,
+        '/portal/customers': null,
+        '/portal/settings': null,
+        '/portal/services': null
+      };
+    %>
+    <header class="p-top">
+      <div class="p-brand">
+        <b><a href="/portal"><%= salon.name %></a></b>
+        <span>Staff portal</span>
+      </div>
+
+      <p class="p-clock">
+        <strong><%= clock.time %> · <%= dates.formatShortDate(clock.date) %></strong>
+        <em><%= portalZoneTag %> · <%= clock.zone %></em>
+      </p>
+
+      <div class="p-user">
+        <span class="p-dot" aria-hidden="true"></span>
+        <span>Signed in as <%= currentUser.name %></span>
+        <a href="/account">My account</a>
+        <a href="/">Public site</a>
+        <form method="post" action="/auth/logout" data-guarded>
+          <%- csrfField() %>
+          <button class="btn btn--sm" type="submit">Sign out</button>
+        </form>
+      </div>
+    </header>
+
+    <div class="p-shell">
+      <nav class="p-nav" aria-label="Portal sections">
+        <% portalNav.forEach(function (item) { %>
+          <a href="<%= item.href %>" aria-current="<%= navCurrent(item.href) %>">
+            <%= item.label %>
+            <% var n = navCounts[item.href]; %>
+            <% if (n) { %><span class="p-nav-count">(<%= n %>)</span><% } %>
+          </a>
+        <% }) %>
+        <a href="/portal/day/<%= clock.date %>">Day sheet</a>
+      </nav>
+
+      <main id="p-main" class="p-main">
+        <% if (hasFlash) { %>
+          <div class="p-alerts" role="status" aria-live="polite">
+            <% flash.success.forEach(function (message) { %>
+              <p class="p-alert p-alert--success"><%= message %></p>
+            <% }) %>
+            <% flash.error.forEach(function (message) { %>
+              <p class="p-alert p-alert--error"><%= message %></p>
+            <% }) %>
+            <% flash.info.forEach(function (message) { %>
+              <p class="p-alert p-alert--info"><%= message %></p>
+            <% }) %>
+          </div>
+        <% } %>

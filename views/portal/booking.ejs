@@ -1,0 +1,153 @@
+<%- include('partials/head') %>
+
+<%
+  var ACTION_LABELS = {
+    pending: 'Return to the queue',
+    confirmed: 'Confirm',
+    completed: 'Mark as served',
+    rejected: 'Decline',
+    cancelled: 'Cancel',
+  };
+  var backTo = '/portal/bookings';
+%>
+
+<div class="p-head">
+  <div>
+    <p class="p-eyebrow">Request #<%= booking.id %> · <span class="p-pill p-pill--<%= booking.status %>"><%= booking.status %></span></p>
+    <h1><%= booking.contact_name %></h1>
+    <p>
+      <%= booking.service_name %> on <%= booking.dayLabel %> at <strong><%= booking.timeLabel %></strong>,
+      which is <%= portalZone %>.
+    </p>
+  </div>
+  <div class="p-actions">
+    <a class="btn" href="<%= backTo %>">All bookings</a>
+    <a class="btn" href="/portal/day/<%= booking.slot_date %>">Day sheet for that date</a>
+  </div>
+</div>
+
+<div class="p-grid p-grid--2">
+  <section class="p-card p-card--accent" aria-labelledby="detail">
+    <h2 id="detail" class="p-card__title">What was asked for</h2>
+    <dl class="p-summary">
+      <dt>Contact name</dt><dd><%= booking.contact_name %><%= booking.preferred_title ? ' (' + booking.preferred_title + ')' : '' %></dd>
+      <dt>Phone</dt><dd><%= booking.contact_phone || 'Not given' %></dd>
+      <dt>Account</dt>
+      <dd><a href="/portal/customers/<%= booking.user_id %>"><%= booking.user_email %></a></dd>
+      <dt>Service</dt><dd><%= booking.service_name %></dd>
+      <dt>Group</dt><dd><%= booking.category_name %></dd>
+      <dt>Chair time</dt><dd><%= booking.duration_minutes %> minutes</dd>
+      <dt>Appointment</dt>
+      <dd>
+        <time class="p-time" <% if (booking.whenIso) { %>data-iso="<%= booking.whenIso %>" datetime="<%= booking.whenIso %>"<% } %>>
+          <%= booking.dayLabel %>, <%= booking.timeLabel %>
+        </time>
+        <span class="p-tag p-tag--zone"><%= portalZoneTag %></span>
+      </dd>
+      <dt>Slot state</dt>
+      <dd>
+        <%= booking.slot_status === 'blocked' ? 'Blocked by the studio' : 'Open' %>
+        <% if (booking.block_reason) { %><span class="p-sub"><%= booking.block_reason %></span><% } %>
+      </dd>
+      <dt>Client note</dt><dd><%= booking.note || 'None' %></dd>
+      <dt>Staff note</dt><dd><%= booking.staff_note || 'None yet' %></dd>
+      <dt>Submitted</dt>
+      <dd>
+        <time class="p-time" <% if (booking.submittedIso) { %>data-iso="<%= booking.submittedIso %>" datetime="<%= booking.submittedIso %>"<% } %>>
+          <%= booking.submittedLabel %>
+        </time>
+      </dd>
+      <dt>Last staff action</dt>
+      <dd>
+        <% if (booking.actionLabel) { %>
+          <time class="p-time" <% if (booking.actionIso) { %>data-iso="<%= booking.actionIso %>" datetime="<%= booking.actionIso %>"<% } %>><%= booking.actionLabel %></time>
+        <% } else { %>
+          None recorded
+        <% } %>
+      </dd>
+    </dl>
+    <% if (booking.isPast && booking.status !== 'completed') { %>
+      <p class="p-note">That appointment date has already passed and the request is still
+        <strong><%= booking.status %></strong>. Marking it served keeps the time off the market; declining or
+        cancelling it releases the slot for someone else.</p>
+    <% } %>
+  </section>
+
+  <section class="p-card" aria-labelledby="decide">
+    <h2 id="decide" class="p-card__title">Update the status</h2>
+    <form method="post" action="/portal/bookings/<%= booking.id %>/status" data-guarded>
+      <%- csrfField() %>
+      <input type="hidden" name="back" value="<%= currentPath %>">
+
+      <div class="p-field">
+        <span class="p-label" id="status-help">Currently: <strong><%= booking.status %></strong>. Choose what the diary should say.</span>
+        <div class="p-actions" role="group" aria-labelledby="status-help">
+          <% statuses.forEach(function (key) { %>
+            <button class="btn <%= key === booking.status ? 'btn--primary' : (key === 'rejected' || key === 'cancelled' ? 'btn--danger' : '') %>"
+                    type="submit" name="status" value="<%= key %>"
+                    <% if (key === booking.status) { %>aria-pressed="true"<% } %>>
+              <%= ACTION_LABELS[key] %>
+            </button>
+          <% }) %>
+        </div>
+      </div>
+
+      <div class="p-field">
+        <label for="staff_note">Staff note <span class="p-optional">optional, kept private</span></label>
+        <textarea id="staff_note" name="staff_note" maxlength="500" rows="3"
+                  placeholder="Anything the studio should remember about this request"><%= booking.staff_note || '' %></textarea>
+        <p class="p-hint">Left blank, the note stays as it is. Only staff read it — it is never shown to the customer.</p>
+      </div>
+
+      <div class="p-form-actions">
+        <span class="p-hint">Every choice writes to the booking table. A confirmed, pending or served request keeps
+          its hold on the slot, so no second client can be given the same time.</span>
+      </div>
+      <span class="p-loading" aria-hidden="true"><span class="p-spin"></span> Saving</span>
+    </form>
+  </section>
+</div>
+
+<section class="p-card p-card--flat" aria-labelledby="who">
+  <h2 id="who" class="p-card__title">The account behind this request</h2>
+  <% if (!account) { %>
+    <p class="p-empty"><strong>That account is no longer in the table.</strong>The booking is kept for the diary,
+      but there is no profile or history left to show.</p>
+  <% } else { %>
+    <dl class="p-summary">
+      <dt>Name</dt><dd><a href="/portal/customers/<%= account.id %>"><%= account.name %></a></dd>
+      <dt>Email</dt><dd><%= account.email %></dd>
+      <dt>Phone</dt><dd><%= account.phone || 'Not on file' %></dd>
+      <dt>Role</dt><dd><%= account.role === 'admin' ? 'Staff' : 'Customer' %><%= account.is_active ? '' : ' · deactivated' %></dd>
+      <dt>Member since</dt><dd><%= account.joinedLabel %></dd>
+      <dt>Last signed in</dt>
+      <dd>
+        <% if (account.signedInLabel) { %>
+          <time class="p-time" <% if (account.signedInIso) { %>data-iso="<%= account.signedInIso %>" datetime="<%= account.signedInIso %>"<% } %>><%= account.signedInLabel %></time>
+        <% } else { %>Never<% } %>
+      </dd>
+      <dt>Bookings on record</dt><dd><%= account.counts.all %></dd>
+    </dl>
+
+    <h3 class="p-card__title" >Their other appointments</h3>
+    <% if (!history.length) { %>
+      <p class="p-empty"><strong>This is their first one.</strong>No other request on this account.</p>
+    <% } else { %>
+      <ul class="p-list">
+        <% history.forEach(function (row) { %>
+          <li>
+            <span class="p-hour"><%= row.shortDay %></span>
+            <p>
+              <a href="/portal/bookings/<%= row.id %>"><%= row.service_name %></a>
+              — <%= row.startLabel %> <%= portalZoneTag %>
+              <span class="p-pill p-pill--<%= row.status %>"><%= row.status %></span><br>
+              <span class="p-hint"><%= row.dayLabel %> · requested <%= row.submittedLabel %></span>
+            </p>
+          </li>
+        <% }) %>
+      </ul>
+    <% } %>
+  <% } %>
+</section>
+
+<%- include('partials/foot') %>

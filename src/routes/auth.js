@@ -191,7 +191,7 @@ router.post(
       userId: outcome.user.id,
       role: outcome.user.role,
       message: `Welcome back, ${firstName}.`,
-      redirectTo: safeReturnTo(req, outcome.user.role === 'admin' ? '/admin' : '/account'),
+      redirectTo: safeReturnTo(req, outcome.user.role === 'admin' ? '/portal' : '/account'),
     });
   }),
 );

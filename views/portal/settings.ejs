@@ -1,0 +1,209 @@
+<%- include('partials/head') %>
+
+<%
+  var zoneSource = zone.saved
+    ? 'Chosen here and saved in the settings table — it wins over the environment default.'
+    : 'The shipped default: SALON_TIMEZONE in .env, which is ' + zone.envDefault + '. Nobody has chosen a clock here yet.';
+%>
+
+<div class="p-head">
+  <div>
+    <p class="p-eyebrow">Studio clock, week timings, booking rules</p>
+    <h1>Hours &amp; settings</h1>
+    <p>
+      Everything here is stored in the same database the booking form reads, so a change is what a customer sees
+      the next time the page loads. Nothing on this page is a prototype and nothing needs another service to be
+      configured first.
+    </p>
+  </div>
+</div>
+
+<section class="p-card p-card--accent" aria-labelledby="clock">
+  <h2 id="clock" class="p-card__title">The salon&rsquo;s operating time zone</h2>
+
+  <dl class="p-summary">
+    <dt>Clock in force</dt><dd><code><%= zone.current %></code></dd>
+    <dt>Shown as</dt><dd><%= zone.tag %></dd>
+    <dt>Short name</dt>
+    <dd>
+      <%= zone.abbreviation || 'None for this zone' %>
+      <span class="p-sub">
+        <% if (zone.abbreviation) { %>
+          The runtime has an abbreviation for it, so it is printed next to every time.
+        <% } else { %>
+          No unambiguous abbreviation exists for this zone, so only the offset
+          (<%= zone.offset %>) is printed. Nothing is guessed.
+        <% } %>
+      </span>
+    </dd>
+    <dt>Where it comes from</dt>
+    <dd><%= zoneSource %></dd>
+    <dt>Studio clock now</dt><dd><%= zone.clock.time %> on <%= dates.formatLongDate(zone.clock.date) %></dd>
+    <dt>Server clock now</dt><dd><%= zone.utcNow %></dd>
+  </dl>
+
+  <form method="post" action="/portal/settings/timezone" data-guarded>
+    <%- csrfField() %>
+    <div class="p-field">
+      <label for="time_zone">Set the clock the studio runs on</label>
+      <input id="time_zone" name="time_zone" type="text" list="zone-presets"
+             value="<%= zone.current %>" maxlength="64" autocomplete="off">
+      <datalist id="zone-presets">
+        <% zone.presets.forEach(function (name) { %><option value="<%= name %>"></option><% }) %>
+      </datalist>
+      <p class="p-hint">
+        An IANA zone name, like <code>Asia/Kolkata</code>. Anything in the list works, and you can type a name not
+        listed — it is checked before it is saved, and a name the runtime cannot read is rejected.
+      </p>
+    </div>
+    <div class="p-form-actions">
+      <button class="btn btn--primary" type="submit">Save the studio clock</button>
+      <span class="p-loading" aria-hidden="true"><span class="p-spin"></span> Saving</span>
+    </div>
+  </form>
+
+  <p class="p-note">
+    Changing this re-labels the diary, it does not move appointments. A booking for 10:30 stays 10:30 on the studio
+    wall clock — what changes is which instant that means, so a customer in another zone sees a different
+    &ldquo;your time&rdquo; under it. Opening hours, the day sheet and the booking form all read this one setting,
+    so the website changes with it. Saved once, it wins over <code>SALON_TIMEZONE</code> in <code>.env</code>.
+  </p>
+</section>
+
+<section class="p-card" aria-labelledby="hours">
+  <h2 id="hours" class="p-card__title">Opening hours</h2>
+  <% if (!week.length) { %>
+    <p class="p-empty">
+      <strong>No weekdays are configured.</strong>
+      Until at least one is saved, the booking form has no times to publish and the availability page stays empty.
+    </p>
+  <% } else { %>
+    <p class="p-hint">
+      Times are written in 24-hour form and read on <strong><%= portalZone %></strong>. Each day saves on its own.
+      Slot rows already published for upcoming dates are not rewritten by a change here — if a timing has to bite
+      sooner, block the affected times on that date&rsquo;s <a href="/portal/day/<%= portalClock.date %>">day sheet</a>.
+    </p>
+    <div class="p-grid p-grid--2">
+      <% week.forEach(function (day) {
+           var nextDay = dates.addDays(portalClock.date, (7 + day.weekday - dates.weekdayOf(portalClock.date)) % 7);
+      %>
+        <form method="post" action="/portal/settings/hours" class="p-card p-card--flat" data-guarded>
+          <%- csrfField() %>
+          <input type="hidden" name="weekday" value="<%= day.weekday %>">
+          <h3 class="p-card__title"><%= day.label %></h3>
+
+          <p class="p-check">
+            <input id="closed-<%= day.weekday %>" name="is_closed" type="checkbox" value="1"
+                   <%= day.is_closed ? 'checked' : '' %>>
+            <label for="closed-<%= day.weekday %>">Closed on <%= day.label %></label>
+          </p>
+
+          <div class="p-filtergrid">
+            <div class="p-field">
+              <label for="open-<%= day.weekday %>">Opens</label>
+              <input id="open-<%= day.weekday %>" name="opens_at" type="time" required value="<%= day.opens_at || '' %>">
+            </div>
+            <div class="p-field">
+              <label for="close-<%= day.weekday %>">Closes</label>
+              <input id="close-<%= day.weekday %>" name="closes_at" type="time" required value="<%= day.closes_at || '' %>">
+            </div>
+          </div>
+
+          <div class="p-field">
+            <label for="note-<%= day.weekday %>">Note <span class="p-optional">optional, shown to staff</span></label>
+            <input id="note-<%= day.weekday %>" name="note" type="text" maxlength="120" value="<%= day.note || '' %>">
+          </div>
+
+          <div class="p-form-actions">
+            <button class="btn btn--primary btn--sm" type="submit">Save <%= day.label %></button>
+            <a class="btn btn--sm" href="/portal/day/<%= nextDay %>">
+              <%= nextDay === portalClock.date ? 'Sheet for this day' : 'Sheet on ' + dates.formatShortDate(nextDay) %>
+            </a>
+            <span class="p-loading" aria-hidden="true"><span class="p-spin"></span> Saving</span>
+          </div>
+        </form>
+      <% }) %>
+    </div>
+    <p class="p-hint">
+      The earliest opening in the week is what the website quotes as &ldquo;<%= salon.opensAtLabel %>&rdquo;.
+      A closing time has to be later than the opening time on the same day, or the save is refused.
+    </p>
+  <% } %>
+</section>
+
+<section class="p-card" aria-labelledby="rules">
+  <h2 id="rules" class="p-card__title">Booking rules</h2>
+  <form method="post" action="/portal/settings/rules" data-guarded>
+    <%- csrfField() %>
+    <div class="p-filtergrid">
+      <% ruleFields.forEach(function (field) { %>
+        <div class="p-field">
+          <label for="<%= field.key %>"><%= field.label %></label>
+          <input id="<%= field.key %>" name="<%= field.key %>" type="number"
+                 min="<%= field.min %>" max="<%= field.max %>" step="1" required value="<%= field.value %>">
+          <p class="p-hint"><%= field.hint %> Between <%= field.min %> and <%= field.max %>.</p>
+        </div>
+      <% }) %>
+    </div>
+    <div class="p-form-actions">
+      <button class="btn btn--primary" type="submit">Save booking rules</button>
+      <span class="p-loading" aria-hidden="true"><span class="p-spin"></span> Saving</span>
+    </div>
+    <p class="p-hint">
+      A number outside its range, or not a number at all, is refused and named in the message — the settings that
+      were fine are still saved. These limits are enforced on the server, not only in this form.
+    </p>
+  </form>
+</section>
+
+<section class="p-card p-card--flat" aria-labelledby="wiring">
+  <h2 id="wiring" class="p-card__title">What this portal is connected to</h2>
+  <ul class="p-list">
+    <li>
+      <span class="p-hour">Data</span>
+      <p>
+        <strong>Live.</strong> SQLite in <code>data/</code>, the same file the public booking flow writes to.
+        Bookings, accounts, hours and this clock are real rows, not fixtures.
+      </p>
+    </li>
+    <li>
+      <span class="p-hour">Sign-in</span>
+      <p>
+        <strong>Live.</strong> Server-side sessions and bcrypt hashes; this whole router is behind the same
+        admin check the API uses, re-read from the database on every request.
+      </p>
+    </li>
+    <li>
+      <span class="p-hour">Email</span>
+      <p>
+        <% if (site.mail.enabled) { %>
+          <strong>On.</strong> Mode <code><%= site.mail.mode %></code><% if (site.mail.host) { %>, host
+          <code><%= site.mail.host %></code><% } %>, from <code><%= site.mail.from %></code>.
+        <% } else { %>
+          <strong>Not configured.</strong> No confirmation mail is sent, and the portal does not pretend otherwise —
+          set <code>SMTP_HOST</code> and its keys in <code>.env</code> to turn it on.
+          <% if (site.mail.reason) { %>(<code><%= site.mail.reason %></code>)<% } %>
+        <% } %>
+      </p>
+    </li>
+    <li>
+      <span class="p-hour">Spam</span>
+      <p>
+        <strong><%= site.captcha.label %>.</strong> <%= site.captcha.note %>
+      </p>
+    </li>
+    <li>
+      <span class="p-hour">Pay</span>
+      <p>
+        <strong>Not built, on purpose.</strong> No payment screen, no card or UPI detail collected anywhere. If the
+        studio later wants a booking fee, that is a separate decision.
+      </p>
+    </li>
+  </ul>
+  <p class="p-hint">
+    Staff accounts are not created here, on purpose: <code>node scripts/create-admin.js</code> on the server is the
+    only way to make one, so an outsider cannot escalate themselves into the diary.
+  </p>
+</section>
+
+<%- include('partials/foot') %>

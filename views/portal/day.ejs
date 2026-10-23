@@ -1,0 +1,149 @@
+<%- include('partials/head') %>
+
+<%
+  var isPast = date < portalClock.date;
+  var here = '/portal/day/' + date;
+  var openCount = rows.filter(function (row) { return row.taken; }).length;
+%>
+
+<div class="p-head">
+  <div>
+    <p class="p-eyebrow"><%= isPast ? 'In the past' : (date === portalClock.date ? 'Today' : 'Ahead') %> ·
+      <%= dates.WEEKDAY_LABELS[dates.weekdayOf(date)] %></p>
+    <h1><%= dates.formatLongDate(date) %></h1>
+    <p>
+      <% if (!hours) { %>
+        No timings are configured for this weekday, so the studio has no slots to give out.
+      <% } else if (hours.closed) { %>
+        Closed on this weekday.<%= hours.note ? ' Reason on file: ' + hours.note + '.' : '' %>
+      <% } else { %>
+        Open <%= dates.formatTime12(hours.opensAt) %> to <%= dates.formatTime12(hours.closesAt) %>,
+        <%= openCount %> of <%= rows.length %> times taken. Times run on <strong><%= portalZone %></strong>.
+      <% } %>
+    </p>
+  </div>
+  <div class="p-actions">
+    <a class="btn" href="/portal/day/<%= dates.addDays(date, -1) %>">Previous day</a>
+    <a class="btn" href="/portal/day/<%= portalClock.date %>">Today</a>
+    <a class="btn" href="/portal/day/<%= dates.addDays(date, 1) %>">Next day</a>
+  </div>
+</div>
+
+<nav class="p-tabs" aria-label="Nearby days">
+  <% for (var i = 0; i < 7; i += 1) { var d = dates.addDays(week, i); %>
+    <a href="/portal/day/<%= d %>" <% if (d === date) { %>aria-current="true"<% } %>>
+      <%= dates.formatShortDate(d) %>
+      <% if (d === portalClock.date) { %><span class="p-tag p-tag--today">today</span><% } %>
+    </a>
+  <% } %>
+</nav>
+
+<% if (isPast) { %>
+  <p class="p-note">This date is behind the studio. Slot rows are kept for the record; blocking or opening a time
+    that has already passed does not change what happened.</p>
+<% } %>
+
+<div class="p-grid p-grid--2">
+  <section class="p-card" aria-labelledby="slots">
+    <h2 id="slots" class="p-card__title">The clock, hour by hour</h2>
+
+    <% if (!rows.length) { %>
+      <p class="p-empty">
+        <strong>No slot rows for this date.</strong>
+        <% if (closed) { %>
+          The studio is closed on this weekday, so nothing was opened up. Change the timings in
+          <a href="/portal/settings">Hours &amp; settings</a> and come back.
+        <% } else if (isPast) { %>
+          Nobody ever booked this day and the booking form never generated it, so there is nothing to show.
+        <% } else { %>
+          This date is outside the horizon the booking form publishes
+          (<%= bookingRules.horizonDays %> days ahead), so no times exist yet.
+        <% } %>
+      </p>
+    <% } else { %>
+      <ul class="p-list">
+        <% rows.forEach(function (row) { %>
+          <li>
+            <span class="p-hour"><%= row.timeLabel %></span>
+            <p>
+              <% if (row.taken) { %>
+                <a href="/portal/bookings/<%= row.booking_id %>"><strong><%= row.contact_name %></strong></a>
+                — <%= row.service_name %>, <%= row.timeLabel %> to <%= row.endLabel %>
+                <span class="p-pill p-pill--<%= row.booking_status %>"><%= row.booking_status %></span><br>
+                <span class="p-hint"><%= row.user_email %><%= row.contact_phone ? ' · ' + row.contact_phone : '' %> · requested <%= row.submittedLabel %></span>
+                <form method="post" action="/portal/bookings/<%= row.booking_id %>/status" class="p-row-form" data-guarded>
+                  <%- csrfField() %>
+                  <input type="hidden" name="back" value="<%= here %>">
+                  <label class="sr-only" for="ds-<%= row.booking_id %>">Status for <%= row.contact_name %> at <%= row.timeLabel %></label>
+                  <select id="ds-<%= row.booking_id %>" name="status">
+                    <% statuses.forEach(function (key) { %>
+                      <option value="<%= key %>" <%= key === row.booking_status ? 'selected' : '' %>><%= key %></option>
+                    <% }) %>
+                  </select>
+                  <button class="btn btn--sm" type="submit">Apply</button>
+                  <span class="p-loading" aria-hidden="true"><span class="p-spin"></span> Saving</span>
+                </form>
+              <% } else if (row.slot_status === 'blocked') { %>
+                <span class="p-tag p-tag--past">Blocked</span>
+                <%= row.block_reason || 'No reason recorded' %><br>
+                <form method="post" action="/portal/day/<%= date %>/slot" class="p-row-form" data-guarded>
+                  <%- csrfField() %>
+                  <input type="hidden" name="back" value="<%= here %>">
+                  <input type="hidden" name="start_time" value="<%= row.start_time %>">
+                  <input type="hidden" name="action" value="unblock">
+                  <button class="btn btn--sm btn--primary" type="submit">Open this time again</button>
+                </form>
+              <% } else { %>
+                Free — a customer can still take it.
+                <form method="post" action="/portal/day/<%= date %>/slot" class="p-row-form" data-guarded>
+                  <%- csrfField() %>
+                  <input type="hidden" name="back" value="<%= here %>">
+                  <input type="hidden" name="start_time" value="<%= row.start_time %>">
+                  <input type="hidden" name="action" value="block">
+                  <label class="sr-only" for="br-<%= row.id %>">Reason to block <%= row.timeLabel %></label>
+                  <input id="br-<%= row.id %>" name="reason" type="text" maxlength="120"
+                         placeholder="e.g. Chair with the technician" autocomplete="off">
+                  <button class="btn btn--sm btn--danger" type="submit">Block</button>
+                </form>
+              <% } %>
+            </p>
+          </li>
+        <% }) %>
+      </ul>
+      <p class="p-hint">
+        Blocking hides a time from the booking form. A time already held by a pending, confirmed or served booking
+        cannot be blocked until that booking is resolved — the portal will say so rather than silently changing it.
+      </p>
+    <% } %>
+  </section>
+
+  <section class="p-card p-card--flat" aria-labelledby="agenda">
+    <h2 id="agenda" class="p-card__title">Everything asked for this day</h2>
+    <% if (!agenda.length) { %>
+      <p class="p-empty"><strong>No requests on this date.</strong>Nothing has been booked, declined or cancelled for it.</p>
+    <% } else { %>
+      <div class="p-table-wrap p-table-wrap--stack">
+        <table>
+          <caption><%= agenda.length %> request<%= agenda.length === 1 ? '' : 's' %>, start times in <%= portalZoneTag %>.</caption>
+          <thead>
+            <tr><th scope="col">Start</th><th scope="col">Client</th><th scope="col">Service</th><th scope="col">Status</th></tr>
+          </thead>
+          <tbody>
+            <% agenda.forEach(function (row) { %>
+              <tr>
+                <th scope="row" data-col="Start">
+                  <time class="p-time" <% if (row.whenIso) { %>data-iso="<%= row.whenIso %>" datetime="<%= row.whenIso %>"<% } %>><%= row.startLabel %></time>
+                </th>
+                <td data-col="Client"><a href="/portal/bookings/<%= row.id %>"><%= row.contact_name %></a><span class="p-sub"><%= row.contact_phone || '—' %></span></td>
+                <td data-col="Service"><%= row.service_name %><span class="p-sub"><%= row.duration_minutes %> min</span></td>
+                <td data-col="Status"><span class="p-pill p-pill--<%= row.status %>"><%= row.status %></span></td>
+              </tr>
+            <% }) %>
+          </tbody>
+        </table>
+      </div>
+    <% } %>
+  </section>
+</div>
+
+<%- include('partials/foot') %>

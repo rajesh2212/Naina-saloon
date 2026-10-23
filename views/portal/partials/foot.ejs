@@ -1,0 +1,16 @@
+      </main>
+    </div><!-- .p-shell -->
+
+    <%# Every clock on these pages is the studio's. The reader's own zone is
+        named here so a staff member on a different laptop never has to guess
+        which clock a booking was written on. portal.js fills #local-zone. %>
+    <footer class="p-foot">
+      <p><strong><%= portalZone %></strong> — the diary is written on it, and so is the website.</p>
+      <p>
+        This device reads <span id="local-zone">its own time zone (enable JavaScript to detect it)</span>.
+        A time repeated underneath as “your time” is the same instant on that clock.
+      </p>
+      <p>Staff records. Do not leave this signed in on a shared machine. <a href="/auth/login">Switch account</a></p>
+    </footer>
+  </body>
+</html>

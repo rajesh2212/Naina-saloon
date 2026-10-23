@@ -1,0 +1,120 @@
+<%- include('partials/head') %>
+
+<%
+  var upcoming = customer.bookings.filter(function (row) { return row.isUpcoming && (row.status === 'pending' || row.status === 'confirmed'); });
+  var past = customer.bookings.filter(function (row) { return !row.isUpcoming || row.status === 'completed'; });
+%>
+
+<div class="p-head">
+  <div>
+    <p class="p-eyebrow">Account #<%= customer.id %></p>
+    <h1><%= customer.name %><%= customer.preferred_title ? ' (' + customer.preferred_title + ')' : '' %></h1>
+    <p>
+      The profile this person gave the studio when they registered, and every appointment they have asked for.
+      Nothing secret is on this page: no password, no hash, no token, no session.
+    </p>
+  </div>
+  <div class="p-actions">
+    <a class="btn" href="/portal/customers">Roster</a>
+    <a class="btn btn--primary" href="/portal/bookings?q=<%= encodeURIComponent(customer.email) %>">Their bookings in the diary</a>
+  </div>
+</div>
+
+<div class="p-grid p-grid--2">
+  <section class="p-card p-card--accent" aria-labelledby="profile">
+    <h2 id="profile" class="p-card__title">Account details</h2>
+    <dl class="p-summary">
+      <dt>Email</dt><dd><%= customer.email %></dd>
+      <dt>Phone</dt><dd><%= customer.phone || 'Not on file' %></dd>
+      <dt>Type</dt><dd><%= customer.role === 'admin' ? 'Staff account' : 'Customer account' %></dd>
+      <dt>Status</dt><dd><%= customer.is_active ? 'Active' : 'Deactivated — cannot sign in' %></dd>
+      <dt>Member since</dt>
+      <dd>
+        <time class="p-time" <% if (customer.joinedIso) { %>data-iso="<%= customer.joinedIso %>" datetime="<%= customer.joinedIso %>"<% } %>><%= customer.joinedLabel %></time>
+      </dd>
+      <dt>Last signed in</dt>
+      <dd>
+        <% if (customer.signedInLabel) { %>
+          <time class="p-time" <% if (customer.signedInIso) { %>data-iso="<%= customer.signedInIso %>" datetime="<%= customer.signedInIso %>"<% } %>><%= customer.signedInLabel %></time>
+        <% } else { %>
+          Never — this account has not used its password yet, so it has not booked anything either.
+        <% } %>
+      </dd>
+      <dt>Their own note</dt><dd><%= customer.notes || 'None' %></dd>
+    </dl>
+    <p class="p-hint">
+      Credentials are stored as a salted bcrypt hash and are not readable by this portal or by anyone at the desk.
+      A customer who has forgotten their password uses the reset link on the website.
+    </p>
+  </section>
+
+  <section class="p-card" aria-labelledby="tally">
+    <h2 id="tally" class="p-card__title">Booking history</h2>
+    <div class="p-grid p-grid--stats">
+      <div class="p-stat"><strong class="p-num"><%= customer.counts.all %></strong><span>requests in total</span></div>
+      <div class="p-stat p-stat--warn"><strong class="p-num"><%= customer.counts.pending %></strong><span>waiting for a decision</span></div>
+      <div class="p-stat"><strong class="p-num"><%= customer.counts.confirmed %></strong><span>confirmed</span></div>
+      <div class="p-stat p-stat--done"><strong class="p-num"><%= customer.counts.completed %></strong><span>served</span></div>
+    </div>
+    <p class="p-hint">
+      Declined <%= customer.counts.rejected %> · cancelled by the client <%= customer.counts.cancelled %>.
+      Times are <%= portalZone %>.
+    </p>
+  </section>
+</div>
+
+<section class="p-card" aria-labelledby="forthcoming">
+  <h2 id="forthcoming" class="p-card__title">Coming up</h2>
+  <% if (!upcoming.length) { %>
+    <p class="p-empty"><strong>Nothing booked ahead.</strong>This account has no pending or confirmed appointment on a date that has not passed.</p>
+  <% } else { %>
+    <ul class="p-list">
+      <% upcoming.forEach(function (row) { %>
+        <li>
+          <span class="p-hour"><%= row.shortDay %></span>
+          <p>
+            <a href="/portal/bookings/<%= row.id %>"><strong><%= row.service_name %></strong></a>
+            — <%= row.timeLabel %> <%= portalZoneTag %>
+            <span class="p-pill p-pill--<%= row.status %>"><%= row.status %></span><br>
+            <span class="p-hint"><%= row.dayLabel %> · requested <%= row.submittedLabel %><% if (row.staff_note) { %> · note: <%= row.staff_note %><% } %></span>
+          </p>
+        </li>
+      <% }) %>
+    </ul>
+  <% } %>
+</section>
+
+<section class="p-card p-card--flat" aria-labelledby="record">
+  <h2 id="record" class="p-card__title">Every request on record</h2>
+  <% if (!past.length) { %>
+    <p class="p-empty"><strong>No completed or past appointments.</strong></p>
+  <% } else { %>
+    <div class="p-table-wrap p-table-wrap--stack">
+      <table>
+        <caption><%= past.length %> appointment<%= past.length === 1 ? '' : 's' %> on or before <%= dates.formatShortDate(portalClock.date) %>, or already closed.</caption>
+        <thead>
+          <tr><th scope="col">#</th><th scope="col">Date and time</th><th scope="col">Service</th><th scope="col">Status</th><th scope="col">Submitted</th></tr>
+        </thead>
+        <tbody>
+          <% past.forEach(function (row) { %>
+            <tr>
+              <th scope="row" data-col="Request"><a href="/portal/bookings/<%= row.id %>">#<%= row.id %></a></th>
+              <td data-col="Date and time">
+                <time class="p-time" <% if (row.whenIso) { %>data-iso="<%= row.whenIso %>" datetime="<%= row.whenIso %>"<% } %>>
+                  <%= row.shortDay %> · <%= row.startLabel %>
+                </time>
+              </td>
+              <td data-col="Service"><%= row.service_name %><span class="p-sub"><%= row.duration_minutes %> min</span></td>
+              <td data-col="Status"><span class="p-pill p-pill--<%= row.status %>"><%= row.status %></span></td>
+              <td data-col="Submitted">
+                <time class="p-time" <% if (row.submittedIso) { %>data-iso="<%= row.submittedIso %>" datetime="<%= row.submittedIso %>"<% } %>><%= row.submittedLabel %></time>
+              </td>
+            </tr>
+          <% }) %>
+        </tbody>
+      </table>
+    </div>
+  <% } %>
+</section>
+
+<%- include('partials/foot') %>

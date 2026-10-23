@@ -82,6 +82,9 @@ const config = {
     phoneHref: '+919439712994',
     address: str(env.SALON_ADDRESS, 'College Road, near Lucky Mess, Bagurai, Jagannathpur, Bhadrak, Odisha 756100, India'),
     since: str(env.SALON_SINCE, '2018'),
+    // Fallback only: the staff portal can set the salon's operating time zone,
+    // and that `salon_timezone` settings row wins over this.
+    timezone: str(env.SALON_TIMEZONE, 'Asia/Kolkata'),
     mapsUrl: str(
       env.SALON_MAPS_URL,
       'https://www.google.com/maps/place/Naina+Beauty+Parlour/@21.0637569,86.4933537,20.97z/data=!4m6!3m5!1s0x3a1bf7f91d33f1ff:0x9874be5037c89943!8m2!3d21.0637734!4d86.4936311!16s%2Fg%2F11fk4qz5qb',

@@ -96,7 +96,7 @@ async function main() {
           'Their previous password still works.\n',
       );
     }
-    stdout.write('Sign in at /auth/login, then open /admin. Change this password from the account page when convenient.\n\n');
+    stdout.write('Sign in at /auth/login, then open the staff portal at /portal. Change this password from the account page when convenient.\n\n');
   } catch (error) {
     stdout.write(`\nStopped: ${error.message}\n`);
     stdout.write('Usage: BOOTSTRAP_ADMIN_EMAIL=staff@example.com BOOTSTRAP_ADMIN_NAME="Salon team" BOOTSTRAP_ADMIN_PASSWORD="choose-a-good-one" npm run create-admin\n');

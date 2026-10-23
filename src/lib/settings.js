@@ -2,7 +2,8 @@
 /** Studio tunables (slot spacing, horizon, notice period) and weekly hours. */
 const db = require('../db');
 const { config } = require('../config');
-const { isValidTime, hmToMinutes } = require('./dates');
+const dates = require('./dates');
+const { isValidTime, hmToMinutes } = dates;
 
 const DEFAULTS = {
   slot_step_minutes: 30,
@@ -36,6 +37,34 @@ function setSetting(key, value) {
     String(value),
     now,
   );
+}
+
+/**
+ * The salon's operating time zone: an IANA name such as 'Asia/Kolkata'.
+ * Stored in the same `settings` table, but read by lib/dates, which owns the
+ * clock. Saving pins the value for this process so the change is immediate.
+ */
+function timeZone() {
+  return dates.salonZone();
+}
+
+/** True when the studio has actually chosen one, vs. the shipped default. */
+function hasSavedTimeZone() {
+  return Boolean(db.get('SELECT value FROM settings WHERE key = ?', dates.ZONE_KEY));
+}
+
+function saveTimeZone(value) {
+  const zone = String(value || '').trim();
+  if (!dates.isValidTimeZone(zone)) {
+    throw new Error('Choose a time zone from the list — the studio clock has to be a real zone name.');
+  }
+  db.run(
+    `INSERT INTO settings (key, value, updated_at) VALUES (?, ?, datetime('now'))
+     ON CONFLICT (key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`,
+    dates.ZONE_KEY,
+    zone,
+  );
+  return dates.setSalonZone(zone);
 }
 
 function bookingRules() {
@@ -105,8 +134,36 @@ function saveWeekHours(weekday, { isClosed, opensAt, closesAt, note }) {
   );
 }
 
+/**
+ * Zones offered in the portal's time zone picker. Any valid IANA name works —
+ * the field is a datalist, so staff can type one not listed here — but these
+ * are the ones a studio in this region is most likely to want.
+ */
+const TIMEZONE_PRESETS = [
+  'Asia/Kolkata',
+  'Asia/Calcutta',
+  'Asia/Dhaka',
+  'Asia/Karachi',
+  'Asia/Kathmandu',
+  'Asia/Tashkent',
+  'Asia/Bangkok',
+  'Asia/Dubai',
+  'Asia/Singapore',
+  'Europe/London',
+  'Europe/Berlin',
+  'America/New_York',
+  'America/Los_Angeles',
+  'Australia/Sydney',
+  'UTC',
+];
+
+function timeZonePresets() {
+  return TIMEZONE_PRESETS.filter(dates.isValidTimeZone);
+}
+
 module.exports = {
   DEFAULTS,
+  HARD_LIMITS,
   getSetting,
   setSetting,
   bookingRules,
@@ -114,4 +171,8 @@ module.exports = {
   dayHours,
   earliestOpening,
   saveWeekHours,
+  timeZone,
+  hasSavedTimeZone,
+  saveTimeZone,
+  timeZonePresets,
 };

@@ -1,8 +1,8 @@
 'use strict';
 /**
  * `npm run check` — reads the configuration, then proves the booking guarantee
- * on the live database inside one transaction that is always rolled back, so no
- * test rows survive.
+ * and the staff portal rules on the live database inside one transaction that is
+ * always rolled back, so no test rows survive.
  */
 const bcrypt = require('bcryptjs');
 const { config, describeConfig } = require('../src/config');
@@ -13,6 +13,8 @@ const slots = require('../src/lib/slots');
 const studio = require('../src/lib/settings');
 const dates = require('../src/lib/dates');
 const users = require('../src/lib/users');
+const records = require('../src/lib/records');
+const guards = require('../src/lib/guards');
 const { digestToken } = require('../src/lib/password');
 
 const results = [];
@@ -48,15 +50,37 @@ console.log(`  booking rules: ${rules.stepMinutes} min spacing, ${rules.horizonD
 
 console.log('\nBooking integrity (everything below is rolled back)');
 
-function makeUser(email, name) {
+function makeUser(email, name, role = 'customer') {
   const hash = bcrypt.hashSync('check-password-1', 4);
   const inserted = db.run(
-    "INSERT INTO users (email, name, password_hash, role) VALUES (?, ?, ?, 'customer')",
+    'INSERT INTO users (email, name, password_hash, role) VALUES (?, ?, ?, ?)',
     email,
     name,
     hash,
+    role,
   );
   return { id: inserted.lastInsertRowid, name };
+}
+
+/**
+ * Runs the portal guard against a stub request. `reached` is only true when the
+ * route would have executed, which is the whole access control claim.
+ */
+function guardReaches(userId) {
+  let reached = false;
+  const res = {
+    locals: {},
+    status() { return this; },
+    json() { return this; },
+    render() { return this; },
+    redirect() { return this; },
+  };
+  guards.requireAdmin(
+    { session: userId ? { userId } : {}, accepts: () => 'html' },
+    res,
+    () => { reached = true; },
+  );
+  return reached;
 }
 
 try {
@@ -156,6 +180,80 @@ try {
       foreignGuard = error;
     }
     record('another account cannot act on someone’s booking', Boolean(foreignGuard), foreignGuard ? foreignGuard.message : 'not blocked');
+
+    // ------------------------------------------------------- staff portal rules
+    console.log('\nStaff portal rules');
+    if (free.length > 1) {
+      const served = slots.createBooking({
+        userId: userA.id,
+        serviceId: service.id,
+        slotId: free[1].id,
+        contactName: userA.name,
+        contactPhone: '9999999999',
+      });
+      const completed = slots.setBookingStatus({ bookingId: served.id, status: 'completed' });
+      record('staff can mark a request served', completed.status === 'completed', `#${completed.id}`);
+      record(
+        'a served appointment keeps its time off the market',
+        !slots.availableSlots(service.id, date).slots.some((slot) => slot.id === free[1].id),
+      );
+      record(
+        '…but it is not an open booking for the client',
+        slots.activeBookingCount(userA.id) === 0,
+        `${slots.activeBookingCount(userA.id)} open`,
+      );
+
+      let servedClash = null;
+      try {
+        db.run(
+          "INSERT INTO bookings (slot_id, user_id, service_id, status, contact_name) VALUES (?, ?, ?, 'completed', 'Direct insert')",
+          free[1].id,
+          userB.id,
+          service.id,
+        );
+      } catch (error) {
+        servedClash = error;
+      }
+      record('the widened unique index covers served bookings too', Boolean(servedClash), servedClash ? 'constraint fired' : 'a second client could take it');
+
+      const agenda = records.dayRows(date).filter((row) => row.booking_id);
+      record('the day sheet sees who holds each time', agenda.length >= 1, `${agenda.length} held slot(s)`);
+    }
+
+    const staffUser = makeUser(`check-staff-${Date.now()}@invalid.example`, 'Integrity Check Staff', 'admin');
+    record('the portal guard lets an admin through', guardReaches(staffUser.id));
+    record('…and refuses a signed-in customer', !guardReaches(userA.id));
+    record('…and refuses an anonymous request', !guardReaches(null));
+
+    const searched = records.searchBookings({ term: 'Integrity Check', sort: 'soonest' });
+    record('staff search matches the test requests', searched.total >= 2, `${searched.total} hit(s)`);
+
+    const hostile = records.searchBookings({ sort: "'; DROP TABLE bookings; --", status: 'nonsense', from: 'yesterday', page: 99 });
+    const tableStillThere = db.get("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'bookings'");
+    record(
+      'a hostile filter falls back instead of reaching SQL',
+      hostile.sort === 'newest' && hostile.status === 'all' && Boolean(tableStillThere),
+      `${hostile.sort} / ${hostile.status} / page ${hostile.page}`,
+    );
+
+    const profile = records.customerForStaff(userA.id);
+    record('customer reads never carry a password hash', Boolean(profile) && !('password_hash' in profile), `#${userA.id}`);
+    record(
+      'a roster filter outside the allowlist is ignored',
+      records.searchCustomers({ filter: "role='admin' OR 1=1" }).filter === 'all',
+    );
+
+    const wallClock = dates.slotToIso(date, '10:30');
+    record(
+      'a salon wall time resolves to one real instant',
+      Boolean(wallClock) && dates.formatStamp(wallClock).includes('10:30 am'),
+      `${date} 10:30 → ${wallClock}`,
+    );
+    record(
+      'an invented zone name is refused rather than guessed',
+      dates.isValidTimeZone('Mars/Phobos') === false && dates.isValidTimeZone(dates.salonZone()) === true,
+      dates.zoneTag(),
+    );
 
     record('reset tokens are stored as sha-256 digests', digestToken('sample').length === 64);
 

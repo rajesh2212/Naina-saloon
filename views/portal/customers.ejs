@@ -1,0 +1,162 @@
+<%- include('partials/head') %>
+
+<%
+  // Rebuild the current URL with one filter changed so tabs, sorting and the
+  // pager never drop the filters already applied.
+  function link(extra) {
+    var params = {};
+    Object.keys(query || {}).forEach(function (key) {
+      var value = query[key];
+      if (value !== undefined && value !== '') params[key] = Array.isArray(value) ? value[0] : value;
+    });
+    Object.keys(extra || {}).forEach(function (key) {
+      var value = extra[key];
+      if (value === undefined || value === null || value === '') delete params[key];
+      else params[key] = value;
+    });
+    var parts = Object.keys(params).map(function (key) {
+      return encodeURIComponent(key) + '=' + encodeURIComponent(params[key]);
+    });
+    return currentPath + (parts.length ? '?' + parts.join('&') : '');
+  }
+
+  var FILTER_LABELS = {
+    all: 'Everyone',
+    signed_in: 'Has signed in',
+    never: 'Never signed in',
+    open_bookings: 'Open booking',
+    served: 'Been served',
+    silent: 'Quiet 6 months+',
+    staff: 'Staff',
+  };
+  var SORT_LABELS = {
+    recent: 'Recently signed in',
+    earliest: 'Joined earliest',
+    name: 'Name (A–Z)',
+    bookings: 'Most bookings',
+  };
+  var filtered = Boolean(result.term || result.filter !== 'all');
+%>
+
+<div class="p-head">
+  <div>
+    <p class="p-eyebrow"><%= result.total %> <%= result.total === 1 ? 'account' : 'accounts' %> in this view</p>
+    <h1>Customers</h1>
+    <p>
+      Who has an account, whether they have signed in, and how much they have booked. Passwords, password hashes,
+      reset tokens and session rows are never read or shown here — only the profile the customer gave the studio.
+    </p>
+  </div>
+  <div class="p-actions">
+    <a class="btn btn--primary" href="/portal/customers?filter=open_bookings">With an open booking</a>
+    <a class="btn" href="/portal/customers?filter=never">Never signed in</a>
+  </div>
+</div>
+
+<section class="p-card p-filters" aria-labelledby="roster-filters">
+  <h2 id="roster-filters" class="sr-only">Search and filters</h2>
+
+  <nav class="p-tabs" aria-label="Filter accounts">
+    <% Object.keys(FILTER_LABELS).forEach(function (key) { %>
+      <a href="<%= link({ filter: key === 'all' ? null : key, page: null }) %>"
+         <% if (result.filter === key) { %>aria-current="true"<% } %>><%= FILTER_LABELS[key] %></a>
+    <% }) %>
+  </nav>
+
+  <form method="get" action="<%= currentPath %>" class="p-filtergrid">
+    <div class="p-field">
+      <label for="q">Search</label>
+      <input id="q" name="q" type="search" value="<%= result.term %>"
+             placeholder="Name, email, phone or account number" autocomplete="off">
+    </div>
+    <div class="p-field">
+      <label for="sort">Order</label>
+      <select id="sort" name="sort">
+        <% Object.keys(SORT_LABELS).forEach(function (key) { %>
+          <option value="<%= key %>" <%= result.sort === key ? 'selected' : '' %>><%= SORT_LABELS[key] %></option>
+        <% }) %>
+      </select>
+    </div>
+    <input type="hidden" name="filter" value="<%= result.filter === 'all' ? '' : result.filter %>">
+    <div class="p-field p-row--narrow">
+      <button class="btn btn--primary" type="submit">Apply</button>
+    </div>
+  </form>
+
+  <p class="p-hint">
+    Sign-in times are <%= portalZone %>.
+    <% if (filtered) { %><a href="/portal/customers">Clear every filter</a><% } %>
+  </p>
+</section>
+
+<% if (!result.rows.length) { %>
+  <p class="p-empty">
+    <strong>No accounts match this.</strong>
+    <% if (filtered) { %>
+      Nobody was removed — try a shorter search or <a href="/portal/customers">the whole roster</a>.
+    <% } else { %>
+      Accounts appear here as soon as someone registers on the website to book an appointment.
+    <% } %>
+  </p>
+<% } else { %>
+  <div class="p-table-wrap p-table-wrap--stack">
+    <table>
+      <caption>
+        Showing <%= result.from %>&ndash;<%= result.to %> of <%= result.total %>.
+        &ldquo;Signed in&rdquo; is the last time this account used its password — <%= portalZone %>.
+      </caption>
+      <thead>
+        <tr>
+          <th scope="col">Account</th>
+          <th scope="col">Contact</th>
+          <th scope="col">Signed in</th>
+          <th scope="col">Bookings</th>
+          <th scope="col">Next confirmed</th>
+          <th scope="col">Joined</th>
+          <th scope="col">Open</th>
+        </tr>
+      </thead>
+      <tbody>
+        <% result.rows.forEach(function (row) { %>
+          <tr>
+            <th scope="row" data-col="Account">
+              <a href="/portal/customers/<%= row.id %>"><%= row.name %></a>
+              <span class="p-sub">#<%= row.id %><%= row.role === 'admin' ? ' · staff' : (row.is_active ? '' : ' · deactivated') %></span>
+            </th>
+            <td data-col="Contact">
+              <%= row.email %>
+              <span class="p-sub"><%= row.phone || 'No phone on file' %></span>
+            </td>
+            <td data-col="Signed in">
+              <% if (row.signedInLabel) { %>
+                <time class="p-time" <% if (row.signedInIso) { %>data-iso="<%= row.signedInIso %>" datetime="<%= row.signedInIso %>"<% } %>><%= row.signedInLabel %></time>
+              <% } else { %>
+                <span class="p-tag p-tag--past">never</span>
+              <% } %>
+            </td>
+            <td data-col="Bookings" class="p-num">
+              <%= row.booking_count %> total
+              <span class="p-sub"><%= row.open_count %> open · <%= row.served_count %> served</span>
+            </td>
+            <td data-col="Next confirmed">
+              <% if (row.next_day) { %><%= dates.formatShortDate(row.next_day) %><% } else { %>—<% } %>
+              <% if (row.lastServedLabel) { %><span class="p-sub">Last served <%= row.lastServedLabel %></span><% } %>
+            </td>
+            <td data-col="Joined"><%= row.joinedLabel %></td>
+            <td data-col="Open"><a class="btn btn--sm" href="/portal/customers/<%= row.id %>">History</a></td>
+          </tr>
+        <% }) %>
+      </tbody>
+    </table>
+  </div>
+
+  <nav class="p-pager" aria-label="Account pages">
+    <p>Page <%= result.page %> of <%= result.pages %></p>
+    <div class="p-pager__links">
+      <% if (result.page > 1) { %><a class="btn btn--sm" href="<%= link({ page: result.page - 1 }) %>">Previous</a><% } %>
+      <% if (result.page < result.pages) { %><a class="btn btn--sm btn--primary" href="<%= link({ page: result.page + 1 }) %>">Next</a><% } %>
+    </div>
+  </nav>
+<% } %>
+
+<%- include('partials/foot') %>

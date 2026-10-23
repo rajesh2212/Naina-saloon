@@ -1,0 +1,17 @@
+<%- include('partials/head') %>
+
+<section class="p-card p-card--accent" aria-labelledby="gone">
+  <h1 id="gone">Not in the diary</h1>
+  <p>
+    No record matches that address. Nothing was deleted — the number is simply not a booking or an account this
+    database holds. Records are kept for the studio, so if you expected one here it was either created under a
+    different number or it belongs to another surface.
+  </p>
+  <div class="p-actions">
+    <a class="btn btn--primary" href="<%= back || '/portal' %>">Back to the list</a>
+    <a class="btn" href="/portal">Dashboard</a>
+    <a class="btn" href="/portal/day/<%= portalClock.date %>">Today&rsquo;s day sheet</a>
+  </div>
+</section>
+
+<%- include('partials/foot') %>

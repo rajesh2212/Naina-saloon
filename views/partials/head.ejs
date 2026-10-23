@@ -26,7 +26,7 @@
             <%# The same account links live here and in .header-cta; CSS shows exactly one set per breakpoint. %>
             <% if (currentUser) { %>
               <li class="nav__auth"><a class="nav__link" href="/account">My bookings</a></li>
-              <% if (isAdmin) { %><li class="nav__auth"><a class="nav__link" href="/admin">Staff area</a></li><% } %>
+              <% if (isAdmin) { %><li class="nav__auth"><a class="nav__link" href="/portal">Staff area</a></li><% } %>
             <% } else { %>
               <li class="nav__auth"><a class="nav__link" href="/auth/login">Sign in</a></li>
               <li class="nav__auth"><a class="nav__link" href="/auth/register">Create an account</a></li>
@@ -50,7 +50,7 @@
         <div class="header-cta">
           <% if (currentUser) { %>
             <a class="btn btn--ghost btn--sm header-cta__auth" href="/account">My bookings</a>
-            <% if (isAdmin) { %><a class="btn btn--primary btn--sm header-cta__auth" href="/admin">Staff area</a><% } %>
+            <% if (isAdmin) { %><a class="btn btn--primary btn--sm header-cta__auth" href="/portal">Staff area</a><% } %>
           <% } else { %>
             <a class="btn btn--ghost btn--sm header-cta__auth" href="/auth/login">Sign in</a>
           <% } %>

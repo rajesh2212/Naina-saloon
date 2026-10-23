@@ -3,18 +3,28 @@
  * Appointment availability and booking.
  *
  * A slot row is one clock time on one date. A slot is free when nothing blocks
- * it and no booking in `pending`/`confirmed` points at it, so `bookings` stays
- * the single source of truth. `bookings.slot_id` carries a partial unique index
- * that makes a second active booking for the same slot impossible at the
- * database level, and every write here runs inside BEGIN IMMEDIATE.
+ * it and no booking holds it, so `bookings` stays the single source of truth.
+ * `bookings.slot_id` carries a partial unique index over the holding statuses
+ * that makes a second booking for the same time impossible at the database
+ * level, and every write here runs inside BEGIN IMMEDIATE.
  */
 const db = require('../db');
 const dates = require('./dates');
 const studio = require('./settings');
 const { HttpError } = require('./async');
 
+/** Still open for the customer: counts against their limit, cancellable. */
 const ACTIVE_STATUSES = ['pending', 'confirmed'];
 const ACTIVE_SQL = ACTIVE_STATUSES.map(() => '?').join(',');
+
+/**
+ * Statuses that keep their grip on a slot. An appointment the studio has
+ * marked served is over, but the time it took was spent — so nobody else may be
+ * handed that slot even if staff close the request before the day has passed.
+ * Matches the partial unique index on `bookings.slot_id`.
+ */
+const HOLD_STATUSES = ['pending', 'confirmed', 'completed'];
+const HOLD_SQL = HOLD_STATUSES.map(() => '?').join(',');
 
 function getService(serviceId, { bookableOnly = true } = {}) {
   const row = db.get(
@@ -82,17 +92,18 @@ function notBeforeMinutesFor(dateStr, leadMinutes) {
 }
 
 /**
- * Is another live booking on this slot? `exceptBookingId` lets a booking move
- * between its own statuses (pending -> confirmed) without clashing with itself.
+ * Does another booking already hold this time? `exceptBookingId` lets a booking
+ * move between its own statuses (pending -> confirmed) without clashing with
+ * itself. Statuses that hold: see HOLD_STATUSES.
  */
-function activeBookingExists(slotId, exceptBookingId = null) {
+function slotIsHeld(slotId, exceptBookingId = null) {
   return Boolean(
     db.get(
       `SELECT 1 AS hit FROM bookings
-       WHERE slot_id = ? AND id IS NOT ? AND status IN (${ACTIVE_SQL})`,
+       WHERE slot_id = ? AND id IS NOT ? AND status IN (${HOLD_SQL})`,
       slotId,
       exceptBookingId,
-      ...ACTIVE_STATUSES,
+      ...HOLD_STATUSES,
     ),
   );
 }
@@ -123,11 +134,11 @@ function availableSlots(serviceId, dateStr) {
      WHERE s.slot_date = ? AND s.status = 'open'
        AND NOT EXISTS (
          SELECT 1 FROM bookings b
-         WHERE b.slot_id = s.id AND b.status IN (${ACTIVE_SQL})
+         WHERE b.slot_id = s.id AND b.status IN (${HOLD_SQL})
        )
      ORDER BY s.start_time`,
     dateStr,
-    ...ACTIVE_STATUSES,
+    ...HOLD_STATUSES,
   );
 
   const minStart = notBefore === null ? hours.openMinutes : notBefore;
@@ -227,7 +238,7 @@ function createBooking({ userId, serviceId, slotId, contactName, contactPhone, p
     }
 
     if (slot.status !== 'open') throw new HttpError(409, 'That slot is blocked by the studio. Please choose another time.');
-    if (activeBookingExists(slot.id)) {
+    if (slotIsHeld(slot.id)) {
       throw new HttpError(409, 'Someone has just taken that slot. Please pick another time.');
     }
 
@@ -297,18 +308,21 @@ function cancelBooking({ bookingId, userId }) {
   });
 }
 
-/** Staff decision: confirm, reject or cancel a request. */
+/** Staff decisions, in the order the portal shows them. */
+const BOOKING_STATUSES = ['pending', 'confirmed', 'completed', 'rejected', 'cancelled'];
+
+/** Staff decision on a request: queue it, confirm it, mark it served, decline or cancel it. */
 function setBookingStatus({ bookingId, status, staffNote }) {
-  if (!['confirmed', 'rejected', 'cancelled', 'pending'].includes(status)) {
+  if (!BOOKING_STATUSES.includes(status)) {
     throw new HttpError(400, 'Unknown booking status.');
   }
   return db.transaction(() => {
     const booking = db.get('SELECT id, status, slot_id FROM bookings WHERE id = ?', bookingId);
     if (!booking) throw new HttpError(404, 'Booking not found.');
 
-    if (ACTIVE_STATUSES.includes(status)) {
-      if (activeBookingExists(booking.slot_id, booking.id)) {
-        throw new HttpError(409, 'Another active booking already holds that slot.');
+    if (HOLD_STATUSES.includes(status)) {
+      if (slotIsHeld(booking.slot_id, booking.id)) {
+        throw new HttpError(409, 'Another booking already holds that time. Resolve it first.');
       }
     }
     db.run(
@@ -330,8 +344,8 @@ function blockSlot({ date, time, blocked, reason }) {
     ensureDateSlots(date, { force: true });
     const slot = db.get('SELECT id, status FROM slots WHERE slot_date = ? AND start_time = ?', date, time);
     if (!slot) throw new HttpError(404, 'That slot does not exist on this date.');
-    if (blocked && activeBookingExists(slot.id)) {
-      throw new HttpError(409, 'That slot already has an active booking. Cancel or move it first.');
+    if (blocked && slotIsHeld(slot.id)) {
+      throw new HttpError(409, 'That time is already held by a booking. Cancel or move it first.');
     }
     db.run('UPDATE slots SET status = ?, block_reason = ? WHERE id = ?', blocked ? 'blocked' : 'open', blocked ? reason || 'Blocked by the studio' : null, slot.id);
     return slot.id;
@@ -340,13 +354,14 @@ function blockSlot({ date, time, blocked, reason }) {
 
 function dayBookings(dateStr) {
   return db.all(
-    `SELECT b.id, b.status, b.contact_name, b.contact_phone, b.preferred_title, b.note, b.staff_note,
-            s.start_time, sv.name AS service_name, sv.duration_minutes, u.email AS user_email
+    `SELECT b.id, b.user_id, b.status, b.created_at, b.contact_name, b.contact_phone,
+            b.preferred_title, b.note, b.staff_note,
+            s.start_time, s.slot_date, sv.name AS service_name, sv.duration_minutes, u.email AS user_email
      FROM bookings b
      JOIN slots s ON s.id = b.slot_id
      JOIN services sv ON sv.id = b.service_id
      JOIN users u ON u.id = b.user_id
-     WHERE s.slot_date = ? AND b.status IN ('pending','confirmed','rejected','cancelled')
+     WHERE s.slot_date = ? AND b.status IN ('pending','confirmed','completed','rejected','cancelled')
      ORDER BY s.start_time`,
     dateStr,
   );
@@ -354,6 +369,9 @@ function dayBookings(dateStr) {
 
 module.exports = {
   ACTIVE_STATUSES,
+  HOLD_STATUSES,
+  BOOKING_STATUSES,
+  slotIsHeld,
   getService,
   ensureDateSlots,
   availableSlots,

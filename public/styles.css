@@ -29,6 +29,9 @@
   --warn-soft: #fbf0da;
   --err: #a8323e;
   --err-soft: #f9e4e6;
+  /* A booking the studio served: over, but not a rejection. */
+  --done: #2b5c72;
+  --done-soft: #dcecf3;
   --charcoal: #1b1512;
 
   --radius: 18px;
@@ -361,6 +364,7 @@ li { margin: 0 0 .35em; }
 .pill::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: currentColor; }
 .pill--pending { background: var(--warn-soft); color: var(--warn); }
 .pill--confirmed { background: var(--ok-soft); color: var(--ok); }
+.pill--completed { background: var(--done-soft); color: var(--done); }
 .pill--rejected, .pill--cancelled { background: var(--err-soft); color: var(--err); }
 
 /* ---------- hero ---------------------------------------------------------- */

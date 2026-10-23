@@ -6,8 +6,9 @@ serving clients since 2018. Phone **094397 12994**.
 
 Clients browse the service catalogue, create an account, and request a real
 appointment slot from the studio's diary. Staff confirm or decline those
-requests from a private admin area. Every time shown on the site comes from the
-database; nothing about availability, sign-in or confirmation is simulated.
+requests from a private portal at `/portal`. Every time shown on the site comes
+from the database; nothing about availability, sign-in or confirmation is
+simulated.
 
 ---
 
@@ -21,6 +22,7 @@ database; nothing about availability, sign-in or confirmation is simulated.
 - [Project layout](#project-layout)
 - [Database schema and migrations](#database-schema-and-migrations)
 - [How availability and double-booking prevention work](#how-availability-and-double-booking-prevention-work)
+- [Staff portal (`/portal`)](#staff-portal-portal)
 - [Editing the catalogue, hours and booking rules](#editing-the-catalogue-hours-and-booking-rules)
 - [Security notes](#security-notes)
 - [Accessibility and mobile behaviour](#accessibility-and-mobile-behaviour)
@@ -81,7 +83,7 @@ npm start
 ```
 
 Then open <http://127.0.0.1:3000>, register a customer account from the site,
-and sign in as the staff user at `/admin` to confirm the request.
+and sign in as the staff user at `/portal` to confirm the request.
 
 To see the booking-integrity guarantees exercised against a throwaway copy of
 your database:
@@ -127,6 +129,7 @@ this repository.**
 | `MAIL_DEV_OUTBOX=file` | Development only: writes reset mails to `data/outbox/*.eml` so the flow can be tested with no mail server. Forced off when `SMTP_HOST` is set. |
 | `BOOTSTRAP_ADMIN_EMAIL/NAME/PASSWORD` | Non-interactive first admin (`npm run create-admin -- --non-interactive`), handy for a deploy pipeline. Do not reuse a real password. |
 | `SALON_*` | Name, tagline, phone, address, `SALON_SINCE`, `SALON_MAPS_URL` — the business details shown across the site. |
+| `SALON_TIMEZONE` | The IANA zone the diary is written on (default `Asia/Kolkata`). A zone saved at `/portal/settings` wins over this, because the studio should not need a terminal to change its clock. |
 
 ---
 
@@ -181,15 +184,17 @@ src/
   lib/
     users.js password.js captcha.js csrf.js session-store.js
     mailer.js validate.js dates.js settings.js slots.js catalogue.js
+    records.js              staff queries: dashboard snapshot, booking search, roster, day rows
     guards.js flash.js auth-rate-limit.js async.js
   routes/
     public.js             home, services, categories, studio, location, how-to-book, /api/availability
     auth.js               register, login, logout, forgot-password, reset
     account.js            profile, password change, booking list + cancel
     booking.js            browse → pick day → pick slot → submit → done
-    admin.js              dashboard, bookings, day sheet, services, hours, settings, customers
-views/                    partials, auth/, pages/, admin/, errors/
-public/                   styles.css, main.js, favicon.svg, assets/
+    portal.js             /portal: dashboard, bookings, customers, day sheet, services, settings
+    admin.js              /admin → 302 to the matching /portal page
+views/                    partials, auth/, pages/, portal/, errors/
+public/                   styles.css, portal.css, main.js, portal.js, favicon.svg, assets/
 scripts/                  migrate, seed, create-admin, generate-slots, check
 data/                     SQLite database + dev outbox (gitignored)
 ```
@@ -223,7 +228,9 @@ URL and stored only as a digest.
 ## How availability and double-booking prevention work
 
 A slot is *bookable* when it is `open`, its start is at least
-`lead_time_minutes` away in **Asia/Kolkata**, the weekday is open, the service's
+`lead_time_minutes` away on **the salon's own clock** (see
+[the staff portal](#staff-portal-portal) — `Asia/Kolkata` until a staff member
+chooses otherwise), the weekday is open, the service's
 `duration_minutes` fits before closing, and no `pending`/`confirmed` booking
 already holds it.
 
@@ -244,8 +251,8 @@ Staff status changes go through the same guard, with the booking's own id
 excluded so a request can move `pending → confirmed` without clashing with
 itself.
 
-Rules the studio can change at any time from `/admin/settings` (values outside
-the hard limits are clamped, never crash):
+Rules the studio can change at any time from `/portal/settings` (values outside
+the hard limits are refused with a message, never stored):
 
 | Setting | Default | Allowed |
 | --- | --- | --- |
@@ -259,24 +266,104 @@ that the studio still has to accept it. Only staff can confirm.
 
 ---
 
+## Staff portal (`/portal`)
+
+The counter screen the studio works from. It is a separate route tree with its
+own stylesheet (`public/portal.css`), its own layout partials and its own
+read/query layer (`src/lib/records.js`); the customer-facing pages and their
+design are untouched and share only the database.
+
+| Page | What it is for |
+| --- | --- |
+| `/portal` | Dashboard: today, the queue waiting on a decision, the next seven days, request volume, accounts active in 30 days |
+| `/portal/bookings` | Every request — client, service, appointment time, status, when it arrived — with search, status tabs, date range, sort and paging |
+| `/portal/bookings/ID` | One request in full, with the decision buttons and a private staff note |
+| `/portal/customers` | Accounts that have signed in, with booking counts, last visit and last sign-in |
+| `/portal/customers/ID` | One client's profile and their whole booking history |
+| `/portal/day/DATE` | The day sheet, hour by hour: who holds each time, block a free time with a reason, reopen a blocked one |
+| `/portal/services` | Chair time, price text, description, bookable flag and per-group visibility |
+| `/portal/settings` | The salon's operating time zone, weekly opening hours, the four booking rules, and what is wired up vs not |
+
+**Access is enforced on the server, on every request.** `src/routes/portal.js`
+mounts `requireAdmin` for the whole tree; it re-reads the account from the
+database by session id, and requires `role = 'admin'` **and** `is_active` before
+any handler runs. There is no portal link to hide: an anonymous visitor and a
+signed-in customer both get a 403 that renders no booking data, and the JSON
+variant says only `Salon staff access only.` Deleting the cookie, editing the
+page or replaying a POST changes nothing — the role check happens again
+server-side, and every mutating form still needs the session's CSRF token. The
+old `/admin/*` URLs 302 to their `/portal` equivalents.
+
+**What the portal never shows:** a password hash, a reset token, a session row,
+or any credential. `records.customerForStaff()` selects account columns by name
+and `scripts/check.js` asserts the returned object has no `password_hash` key,
+so a future column cannot quietly start leaking into the roster.
+
+**Statuses** — `pending` (held, awaiting a decision), `confirmed`, `completed`
+(served: the time stays closed but it is no longer an open booking),
+`rejected` and `cancelled` (both free the time again). `pending`, `confirmed`
+and `completed` all hold the slot against a second booking, which is what the
+partial unique index enforces.
+
+### The salon's clock
+
+Booking times are wall-clock values on the salon's own time zone, and the zone is
+a setting rather than a constant:
+
+1. the `salon_timezone` row in `settings`, chosen at `/portal/settings`;
+2. else `SALON_TIMEZONE` from the environment;
+3. else `Asia/Kolkata`.
+
+Every time in the portal is labelled with that zone (e.g. `Salon time
+(IST · GMT+05:30 · Asia/Kolkata)`), and `public/portal.js` adds the
+*reader's* local time underneath each one, so a staff member on another clock
+can see both. The footer states which zone the diary is written on and which
+zone this device reports. Changing the zone **re-labels** the diary — a 10:30
+appointment is 10:30 in the new zone — it does not move appointments that were
+booked under the old one, and the settings page says so out loud. An invented
+zone name is rejected rather than guessed, and the abbreviation is omitted when
+the runtime has no real name for the offset.
+
+### Making a staff account
+
+Portal logins are created on the terminal, never through the website:
+
+```bash
+npm run create-admin
+```
+
+It asks for an email, a display name and a password (or reads
+`BOOTSTRAP_ADMIN_EMAIL/_NAME/_PASSWORD` from `.env`), stores only a bcrypt hash,
+and promotes an existing account rather than overwriting its password. There is
+no signup path to `role = 'admin'`.
+
+---
+
 ## Editing the catalogue, hours and booking rules
 
 Everything the business may want to change later is data, not code. All of it is
-editable at `/admin` (staff login required):
+editable in the [staff portal](#staff-portal-portal) (staff login required):
 
-- **`/admin/services`** — edit any service's name, description, chair time and
-  **price text**, or mark it unbookable; add services and rename/hide groups.
+- **`/portal/services`** — edit any service's name, description, chair time and
+  **price text**, or mark it unbookable; show or hide a whole group.
   Prices ship as `NULL` and render as *"At the studio"* because none were
-  supplied for this build — type the real figures in here.
-- **`/admin/hours`** — per-weekday open/close, or mark a day closed. The seeded
-  closing times are labelled *"Placeholder closing time — studio to confirm"*;
-  only the 9:00 am opening was given, so confirm and replace them.
-- **`/admin/settings`** — the four booking rules above.
-- **`/admin/day/DATE`** — the day sheet: block a single time (with a reason) or
-  reopen it. Blocked times disappear from availability immediately.
-- **`/admin/bookings`** — filter by status/day/service, confirm, decline or
-  complete a request, leave a staff note.
-- **`/admin/customers/ID`** — one client's history, for the counter.
+  supplied for this build — type the real figures in here. Price text is
+  display only; no payment is taken anywhere on this site.
+- **`/portal/settings` → Opening hours** — per-weekday open/close, or mark a day
+  closed. The seeded closing times are labelled *"Placeholder closing time —
+  studio to confirm"*; only the 9:00 am opening was given, so confirm and replace
+  them. Chair time is what decides which slots fit inside a day.
+- **`/portal/settings` → Booking rules** — the four rules above, each checked
+  against its allowed range before it is written.
+- **`/portal/settings` → Time zone** — the salon's operating clock, applied to
+  the diary and the website at once.
+- **`/portal/day/DATE`** — the day sheet: block a single time (with a reason) or
+  reopen it. Blocked times disappear from availability immediately, and a time
+  held by a booking cannot be blocked out from under the client.
+- **`/portal/bookings`** — search by name, phone, email or note, filter by
+  status/day, then confirm, mark served, decline or cancel, with a staff note.
+- **`/portal/customers`** and **`/portal/customers/ID`** — the roster and one
+  client's history, for the counter.
 
 Customer-facing: `/account` lists **pending vs confirmed** separately, `/account/profile`
 updates name/phone/title/notes, and a booking can be cancelled there (which frees
@@ -316,8 +403,12 @@ the slot).
   `frame-ancestors 'none'`, `X-Content-Type-Options: nosniff`, HSTS in
   production.
 - **Privacy** — a customer sees only their own bookings; ownership is re-checked
-  on every read and mutation, so guessing an id returns 404. Staff routes sit
-  behind both a login and an `admin` role check. Emails are never enumerated: a
+  on every read and mutation, so guessing an id returns 404. The staff portal sits
+  behind a server-side `admin` role check on every request (see
+  [the staff portal](#staff-portal-portal)), its pages carry `noindex` so the
+  diary is never crawled, and its queries select account columns by name — a
+  password hash, reset token or session row is never in the data a page could
+  render. Emails are never enumerated: a
   sign-in failure gives one generic message, and forgot-password behaves the same
   whether or not the address exists (when mail is configured).
 - **Errors** — 5xx responses carry a generic sentence; the stack trace goes to
@@ -362,7 +453,9 @@ inclusion → find us → footer, with booking as the primary action at every st
 
 All of it is driven by CSS custom properties in `public/styles.css`; the token
 names (`--teal`, `--red`, `--rose`) were kept when the palette was re-skinned so
-the ~30 admin and auth templates follow along without edits.
+the auth and account templates follow along without edits. The staff portal
+shares the same tokens from its own stylesheet (`public/portal.css`), which is
+why it reads as the same studio rather than a bolted-on back office.
 
 **The CSP forbids `style="…"` attributes and `<style>` blocks** (`style-src
 'self'`), so one-off rules live in utility classes instead. Nothing in `views/`
@@ -388,8 +481,7 @@ about, visit, service and gallery groups); `public/assets/README.md` has the
 filenames and framing notes.
 
 The boot banner and `npm run check` both report how many slots hold a real
-photograph, so the team can see what shooting is still outstanding; the admin
-"Studio diary" screen lists the exact filenames that are missing.
+photograph, so the team can see at a glance what shooting is still outstanding.
 
 ### The hero: wordmark left, portrait right, nothing overlapping
 
@@ -480,22 +572,48 @@ throwaway account it deletes) and asserts:
 ```
 PASS  service catalogue seeded — 39 bookable services
 PASS  weekday rows present — 7/7
-PASS  availability comes from the database — 16 free slot(s) on 2026-10-25 for Bridal Makeup
-PASS  first request is created as pending
+PASS  availability comes from the database — 16 free slot(s) on 2026-10-26 for Bridal Makeup
+PASS  first request is created as pending — #3 at 09:00
 PASS  taken slot disappears from availability
 PASS  second request for the same slot is refused
 PASS  unique index blocks a direct duplicate insert
-PASS  staff can confirm a pending request
+PASS  staff can confirm a pending request — #3 is confirmed
 PASS  a confirmed slot still refuses a second booking
 PASS  cancelling frees the booking
 PASS  freed slot is bookable again
-PASS  another account cannot act on someone's booking
+PASS  another account cannot act on someone’s booking
+PASS  staff can mark a request served — #4
+PASS  a served appointment keeps its time off the market
+PASS  …but it is not an open booking for the client — 0 open
+PASS  the widened unique index covers served bookings too
+PASS  the day sheet sees who holds each time — 1 held slot(s)
+PASS  the portal guard lets an admin through
+PASS  …and refuses a signed-in customer
+PASS  …and refuses an anonymous request
+PASS  staff search matches the test requests — 2 hit(s)
+PASS  a hostile filter falls back instead of reaching SQL — newest / all / page 1
+PASS  customer reads never carry a password hash
+PASS  a roster filter outside the allowlist is ignored
+PASS  a salon wall time resolves to one real instant — 2026-10-26 10:30 → 2026-10-26T05:00:00Z
+PASS  an invented zone name is refused rather than guessed — GMT+05:30
 PASS  reset tokens are stored as sha-256 digests
 PASS  changing a password signs every other device out
 PASS  …and drops the account's outstanding reset links
 PASS  the new password is the one that verifies
-17/17 checks passed.
+31/31 checks passed.
 ```
+
+The portal was then driven over **real HTTP** against the running server — every
+page and every mutating form — to confirm what an in-process test cannot: that
+the guard fires before a handler, that a 403 carries no booking data, that a
+stale or missing CSRF token is refused with 400 while the session's live token
+is accepted, that a search/filter/paging query string cannot reach SQL, that
+blocking a time removes it from `/api/availability` and that reopening it
+returns, that an out-of-range booking rule is refused rather than stored, and
+that saving a time zone re-labels the diary without moving an appointment. All
+68 of those assertions passed, and the rows the run touched (statuses, staff
+notes, opening hours, settings, throwaway logins) were restored afterwards — the
+database this README was written against is the one it started from.
 
 Beyond the script, the whole flow was re-run against a **wiped database** using
 only the documented commands (`npm run db:setup`, `npm run create-admin`,
@@ -506,13 +624,20 @@ steps, all passing. Every route (including all 8 category pages, the guard
 redirects, the 404, the 410 expired-reset page and the CSRF rejection page)
 renders without a server error, and the browser console is clean on every page.
 
-The database shipped in `data/` (gitignored) contains the seeded catalogue and
-**no accounts at all** — no demo customer, no demo staff login. Create your own
-with `npm run create-admin`.
+The database in `data/` is gitignored, so a clone starts with the seeded
+catalogue and **no accounts at all** — no demo customer, no demo staff login.
+Create your own with `npm run create-admin`.
 
 Mobile and accessibility were measured in a real 390 px viewport: no page pans
 horizontally, no control falls below the 44 px height guideline (the consent
 checkbox excepted — see above), every field has a label, all text colour pairs
 clear WCAG AA 4.5:1, keyboard focus draws a visible ring on links, buttons,
 inputs and slot tiles, and the time grid is a labelled `fieldset` navigable with
-arrow keys.
+arrow keys. The portal was measured the same way at 390, 660 and 1440 px: no
+horizontal panning at any width (wide tables become stacked cards below 720 px,
+the day-sheet rows wrap their inline form onto its own line, and the sidebar nav
+becomes a scrollable strip), every `input`, `select` and
+`textarea` carries a label, each page has one `h1` plus `header`/`nav`/`main`/
+`footer` landmarks and a skip link, table headers carry `scope`, every tap target
+clears WCAG 2.5.8 (the smallest control measured was 30 px tall), and each status
+pill is paired with its word rather than relying on colour alone.

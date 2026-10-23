@@ -23,6 +23,7 @@ const authRoutes = require('./routes/auth');
 const accountRoutes = require('./routes/account');
 const bookingRoutes = require('./routes/booking');
 const adminRoutes = require('./routes/admin');
+const portalRoutes = require('./routes/portal');
 
 const VIEWS = path.join(__dirname, '..', 'views');
 
@@ -202,6 +203,8 @@ function createApp() {
   app.use('/auth', authRoutes);
   app.use('/account', accountRoutes);
   app.use('/book', bookingRoutes);
+  app.use('/portal', portalRoutes);
+  // Old staff URLs; see src/routes/admin.js.
   app.use('/admin', adminRoutes);
 
   app.use((req, res) => {

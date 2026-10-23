@@ -1,0 +1,145 @@
+<%- include('partials/head') %>
+
+<%
+  var stats = [
+    { label: 'On the diary today', value: snap.todayBookings.length, href: '/portal/day/' + snap.day },
+    { label: 'Waiting for a decision', value: snap.counts.pending, href: '/portal/bookings?status=pending', tone: 'p-stat--warn' },
+    { label: 'Confirmed', value: snap.counts.confirmed, href: '/portal/bookings?status=confirmed' },
+    { label: 'Served, last 7 days', value: snap.servedThisWeek, href: '/portal/bookings?status=completed', tone: 'p-stat--done' },
+    { label: 'Requests, last 7 days', value: snap.requestsThisWeek, href: '/portal/bookings' },
+    { label: 'Accounts signed in, 30 days', value: snap.signedInRecently, href: '/portal/customers?filter=signed_in' },
+  ];
+%>
+
+<div class="p-head">
+  <div>
+    <p class="p-eyebrow"><%= dates.formatLongDate(snap.day) %></p>
+    <h1>Studio dashboard</h1>
+    <p>
+      Live records, read from the same database the booking form writes to — nothing on this page is a
+      sample. <strong><%= portalZone %></strong>; the studio clock is set under Hours &amp; settings.
+    </p>
+  </div>
+  <div class="p-actions">
+    <a class="btn btn--primary" href="/portal/day/<%= snap.day %>">Today&rsquo;s day sheet</a>
+    <a class="btn" href="/portal/bookings?status=pending">Open queue</a>
+  </div>
+</div>
+
+<div class="p-grid p-grid--stats">
+  <% stats.forEach(function (item) { %>
+    <div class="p-stat <%= item.tone || '' %>">
+      <a href="<%= item.href %>"><strong class="p-num"><%= item.value %></strong><span><%= item.label %></span></a>
+    </div>
+  <% }) %>
+</div>
+
+<section class="p-card p-card--accent" aria-labelledby="today">
+  <h2 id="today" class="p-card__title">Today, <%= dates.formatShortDate(snap.day) %> · <%= portalZoneTag %></h2>
+  <% if (!snap.todayBookings.length) { %>
+    <p class="p-empty">
+      <strong>Nothing on the diary for today.</strong>
+      Requests that arrive are held in the queue until someone here confirms them —
+      <a href="/portal/bookings?status=pending">check the pending list</a> or open
+      <a href="/portal/day/<%= dates.addDays(snap.day, 1) %>">tomorrow&rsquo;s sheet</a>.
+    </p>
+  <% } else { %>
+    <div class="p-table-wrap p-table-wrap--stack">
+      <table>
+        <caption class="sr-only">Appointments booked for <%= dates.formatLongDate(snap.day) %>, all times salon time.</caption>
+        <thead>
+          <tr><th scope="col">Start</th><th scope="col">Client</th><th scope="col">Service</th><th scope="col">Status</th><th scope="col">Contact</th></tr>
+        </thead>
+        <tbody>
+          <% snap.todayBookings.forEach(function (row) { %>
+            <tr>
+              <th scope="row" data-col="Start">
+                <time class="p-time" <% if (row.whenIso) { %>data-iso="<%= row.whenIso %>" datetime="<%= row.whenIso %>"<% } %>><%= row.startLabel %></time>
+                <span class="p-sub"><%= row.timeLabel %></span>
+              </th>
+              <td data-col="Client">
+                <a href="/portal/bookings/<%= row.id %>"><%= row.contact_name %></a>
+                <% if (row.preferred_title) { %><span class="p-sub"><%= row.preferred_title %></span><% } %>
+              </td>
+              <td data-col="Service"><%= row.service_name %><span class="p-sub"><%= row.duration_minutes %> min</span></td>
+              <td data-col="Status"><span class="p-pill p-pill--<%= row.status %>"><%= row.status %></span></td>
+              <td data-col="Contact">
+                <%= row.contact_phone || '—' %>
+                <span class="p-sub"><a href="/portal/customers/<%= row.user_id %>"><%= row.user_email %></a></span>
+              </td>
+            </tr>
+          <% }) %>
+        </tbody>
+      </table>
+    </div>
+  <% } %>
+</section>
+
+<div class="p-grid p-grid--2">
+  <section class="p-card" aria-labelledby="queue">
+    <h2 id="queue" class="p-card__title">Waiting for a decision <span class="p-tag"><%= snap.counts.pending %></span></h2>
+    <% if (!snap.waiting.length) { %>
+      <p class="p-empty"><strong>The queue is clear.</strong>Every request has been confirmed, served, declined or cancelled.</p>
+    <% } else { %>
+      <% if (snap.oldestWait) { %>
+        <p class="p-hint">
+          Oldest still unanswered:
+          <a href="/portal/bookings/<%= snap.oldestWait.id %>">request #<%= snap.oldestWait.id %></a>,
+          raised <%= dates.formatStamp(snap.oldestWait.created_at) %>.
+        </p>
+      <% } %>
+      <ul class="p-list">
+        <% snap.waiting.forEach(function (row) { %>
+          <li>
+            <span class="p-hour"><%= row.shortDay %></span>
+            <p>
+              <a href="/portal/bookings/<%= row.id %>"><strong><%= row.contact_name %></strong> — <%= row.service_name %></a><br>
+              <%= row.startLabel %> · <%= row.timeLabel %> <%= portalZoneTag %><br>
+              <span class="p-hint">Submitted <%= row.submittedLabel %></span>
+            </p>
+          </li>
+        <% }) %>
+      </ul>
+      <p><a class="btn btn--sm" href="/portal/bookings?status=pending">All pending requests</a></p>
+    <% } %>
+  </section>
+
+  <section class="p-card" aria-labelledby="ahead">
+    <h2 id="ahead" class="p-card__title">Confirmed, next seven days</h2>
+    <% if (!snap.upcomingConfirmed.length) { %>
+      <p class="p-empty">
+        <strong>No confirmed appointments this week.</strong>
+        Pending requests stay unheld until they are confirmed —
+        <a href="/portal/bookings?status=pending">the queue</a> is where they wait.
+      </p>
+    <% } else { %>
+      <ul class="p-list">
+        <% snap.upcomingConfirmed.forEach(function (row) { %>
+          <li>
+            <span class="p-hour"><%= row.shortDay %></span>
+            <p>
+              <a href="/portal/bookings/<%= row.id %>"><strong><%= row.contact_name %></strong> — <%= row.service_name %></a><br>
+              <%= row.startLabel %> · <%= row.timeLabel %> <%= portalZoneTag %>
+              <% if (row.isToday) { %><span class="p-tag p-tag--today">today</span><% } %>
+            </p>
+          </li>
+        <% }) %>
+      </ul>
+    <% } %>
+  </section>
+</div>
+
+<section class="p-card p-card--flat" aria-labelledby="accounts-note">
+  <h2 id="accounts-note" class="p-card__title">Accounts</h2>
+  <p>
+    <%= snap.accounts %> customer <%= snap.accounts === 1 ? 'account' : 'accounts' %> and
+    <%= snap.staffAccounts %> staff <%= snap.staffAccounts === 1 ? 'account' : 'accounts' %>,
+    with <%= snap.counts.all %> bookings on record in total.
+  </p>
+  <p class="p-note">
+    Names, phone numbers and appointment histories are staff-only. The portal reads the account columns it needs
+    and never selects a password hash, a reset token or a session row.
+  </p>
+</section>
+
+<%- include('partials/foot') %>

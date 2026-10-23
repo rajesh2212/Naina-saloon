@@ -1,0 +1,190 @@
+<%- include('partials/head') %>
+
+<%
+  // Rebuild the current URL with one filter changed, so tabs, sorting and the
+  // pager never drop the filters already applied. Empty or null clears a key.
+  function link(extra) {
+    var params = {};
+    Object.keys(query || {}).forEach(function (key) {
+      var value = query[key];
+      if (value !== undefined && value !== '') params[key] = Array.isArray(value) ? value[0] : value;
+    });
+    Object.keys(extra || {}).forEach(function (key) {
+      var value = extra[key];
+      if (value === undefined || value === null || value === '') delete params[key];
+      else params[key] = value;
+    });
+    var parts = Object.keys(params).map(function (key) {
+      return encodeURIComponent(key) + '=' + encodeURIComponent(params[key]);
+    });
+    return currentPath + (parts.length ? '?' + parts.join('&') : '');
+  }
+
+  var SORT_LABELS = {
+    newest: 'Newest request first',
+    oldest: 'Oldest request first',
+    soonest: 'Earliest appointment first',
+    latest: 'Latest appointment first',
+  };
+  var here = link({});
+%>
+
+<div class="p-head">
+  <div>
+    <p class="p-eyebrow"><%= result.total %> <%= result.total === 1 ? 'request' : 'requests' %> found</p>
+    <h1>Bookings</h1>
+    <p>
+      Every appointment the studio has been asked for, with who asked, for what, on which day, the decision it is
+      waiting for, and when it arrived. All times are <strong><%= portalZone %></strong>.
+    </p>
+  </div>
+  <div class="p-actions">
+    <a class="btn" href="/portal/bookings?status=pending">Queue</a>
+    <a class="btn" href="/portal/bookings?sort=soonest&from=<%= portalClock.date %>">Upcoming, by date</a>
+  </div>
+</div>
+
+<section class="p-card p-filters" aria-labelledby="filters">
+  <h2 id="filters" class="sr-only">Search and filters</h2>
+
+  <nav class="p-tabs" aria-label="Filter by status">
+    <% ['all'].concat(statuses).forEach(function (key) { %>
+      <a href="<%= link({ status: key === 'all' ? null : key, page: null }) %>"
+         <% if (result.status === key) { %>aria-current="true"<% } %>>
+        <%= key %> <span class="p-count">(<%= portalStatusCounts[key] || 0 %>)</span>
+      </a>
+    <% }) %>
+  </nav>
+
+  <form method="get" action="<%= currentPath %>" class="p-filtergrid">
+    <div class="p-field">
+      <label for="q">Search</label>
+      <input id="q" name="q" type="search" value="<%= result.term %>"
+             placeholder="Name, phone, email, service, note or #number" autocomplete="off">
+    </div>
+    <div class="p-field">
+      <label for="from">Appointments from</label>
+      <input id="from" name="from" type="date" value="<%= result.dateFrom %>">
+    </div>
+    <div class="p-field">
+      <label for="to">to</label>
+      <input id="to" name="to" type="date" value="<%= result.dateTo %>">
+    </div>
+    <div class="p-field">
+      <label for="sort">Order</label>
+      <select id="sort" name="sort">
+        <% Object.keys(SORT_LABELS).forEach(function (key) { %>
+          <option value="<%= key %>" <% if (result.sort === key) { %>selected<% } %>><%= SORT_LABELS[key] %></option>
+        <% }) %>
+      </select>
+    </div>
+    <input type="hidden" name="status" value="<%= result.status === 'all' ? '' : result.status %>">
+    <div class="p-field p-row--narrow">
+      <button class="btn btn--primary" type="submit">Apply filters</button>
+    </div>
+  </form>
+
+  <p class="p-hint">
+    Dates compare the appointment day, not the day the request arrived.
+    <% if (result.term || result.dateFrom || result.dateTo || result.status !== 'all') { %>
+      <a href="/portal/bookings">Clear every filter</a>
+    <% } %>
+  </p>
+</section>
+
+<% if (!result.rows.length) { %>
+  <p class="p-empty">
+    <strong>No bookings match this.</strong>
+    <% if (result.term || result.dateFrom || result.dateTo || result.status !== 'all') { %>
+      Nothing was deleted — widen the dates, change the status, or
+      <a href="/portal/bookings">start from the full list</a>.
+    <% } else { %>
+      The diary is empty. Requests appear here the moment a customer submits the booking form on the website.
+    <% } %>
+  </p>
+<% } else { %>
+  <div class="p-table-wrap p-table-wrap--stack">
+    <table>
+      <caption>
+        Showing <%= result.from %>&ndash;<%= result.to %> of <%= result.total %>.
+        Appointment and submission times are <%= portalZone %>; the column header says so because a booking
+        made for “10:30” means 10:30 in Bhadrak.
+      </caption>
+      <thead>
+        <tr>
+          <th scope="col">#</th>
+          <th scope="col">Client</th>
+          <th scope="col">Service</th>
+          <th scope="col">Appointment</th>
+          <th scope="col">Status</th>
+          <th scope="col">Submitted</th>
+          <th scope="col">Change status</th>
+        </tr>
+      </thead>
+      <tbody>
+        <% result.rows.forEach(function (row) { %>
+          <tr>
+            <th scope="row" data-col="Request">
+              <a href="/portal/bookings/<%= row.id %>">#<%= row.id %></a>
+              <% if (row.isToday) { %><span class="p-tag p-tag--today">today</span><% } %>
+              <% if (row.isPast) { %><span class="p-tag p-tag--past">past</span><% } %>
+            </th>
+            <td data-col="Client">
+              <%= row.contact_name %><%= row.preferred_title ? ' (' + row.preferred_title + ')' : '' %>
+              <span class="p-sub"><%= row.contact_phone || 'No phone given' %></span>
+              <span class="p-sub"><a href="/portal/customers/<%= row.user_id %>"><%= row.user_email %></a></span>
+            </td>
+            <td data-col="Service">
+              <%= row.service_name %>
+              <span class="p-sub"><%= row.category_name %> · <%= row.duration_minutes %> min</span>
+            </td>
+            <td data-col="Appointment">
+              <time class="p-time" <% if (row.whenIso) { %>data-iso="<%= row.whenIso %>" datetime="<%= row.whenIso %>"<% } %>>
+                <%= row.dayLabel %><br><strong><%= row.timeLabel %></strong>
+              </time>
+              <span class="p-sub"><%= portalZoneTag %></span>
+            </td>
+            <td data-col="Status">
+              <span class="p-pill p-pill--<%= row.status %>"><%= row.status %></span>
+              <% if (row.staff_note) { %><span class="p-sub">Staff note: <%= row.staff_note %></span><% } %>
+              <% if (row.note) { %><span class="p-sub">Client note: <%= row.note %></span><% } %>
+            </td>
+            <td data-col="Submitted">
+              <time class="p-time" <% if (row.submittedIso) { %>data-iso="<%= row.submittedIso %>" datetime="<%= row.submittedIso %>"<% } %>>
+                <%= row.submittedLabel %>
+              </time>
+            </td>
+            <td data-col="Change status">
+              <form method="post" action="/portal/bookings/<%= row.id %>/status" class="p-row-form" data-guarded>
+                <%- csrfField() %>
+                <input type="hidden" name="back" value="<%= here %>">
+                <label class="sr-only" for="status-<%= row.id %>">New status for request #<%= row.id %> (<%= row.contact_name %>)</label>
+                <select id="status-<%= row.id %>" name="status">
+                  <% statuses.forEach(function (key) { %>
+                    <option value="<%= key %>" <%= key === row.status ? 'selected' : '' %>><%= key %></option>
+                  <% }) %>
+                </select>
+                <button class="btn btn--sm" type="submit">Apply</button>
+                <span class="p-loading" aria-hidden="true"><span class="p-spin"></span> Saving</span>
+              </form>
+            </td>
+          </tr>
+        <% }) %>
+      </tbody>
+    </table>
+  </div>
+
+  <nav class="p-pager" aria-label="Booking pages">
+    <p>Page <%= result.page %> of <%= result.pages %> · <%= result.total %> in this view</p>
+    <div class="p-pager__links">
+      <% if (result.page > 1) { %>
+        <a class="btn btn--sm" href="<%= link({ page: result.page - 1 }) %>">Previous</a>
+      <% } %>
+      <% if (result.page < result.pages) { %>
+        <a class="btn btn--sm btn--primary" href="<%= link({ page: result.page + 1 }) %>">Next</a>
+      <% } %>
+    </div>
+  </nav>
+<% } %>
+
+<%- include('partials/foot') %>
