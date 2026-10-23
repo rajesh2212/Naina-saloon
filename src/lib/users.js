@@ -3,9 +3,13 @@
 const db = require('../db');
 const { hashPassword, verifyPassword } = require('./password');
 const { normalizeEmail, normalizeText, normalizePhone, normalizeMultiline } = require('./validate');
+const profile = require('./profile');
 
+// `photo_path` is only ever a path under public/uploads/avatars; the image bytes
+// stay on disk. Every screen that lists accounts reads through this column list,
+// so a password hash can never ride along to the browser by accident.
 const PUBLIC_COLUMNS =
-  'id, email, name, phone, preferred_title, notes, role, is_active, created_at, last_login_at';
+  'id, email, name, phone, preferred_title, notes, age, address, block, photo_path, role, is_active, created_at, last_login_at';
 
 function findByEmail(email) {
   return db.get('SELECT * FROM users WHERE email = ?', normalizeEmail(email));
@@ -44,16 +48,38 @@ async function verifyCredentials(email, password) {
   return ok ? { ok: true, user } : { ok: false, reason: 'invalid' };
 }
 
-function updateProfile(id, { name, phone, preferredTitle, notes }) {
+/**
+ * Edit the customer's own details. A field left out of `values` keeps whatever
+ * is already stored, so a form that only posts part of the profile cannot
+ * quietly blank the rest of it.
+ */
+function updateProfile(id, values = {}) {
+  const user = findById(id);
+  if (!user) return null;
+  const kept = (key, incoming) => (incoming === undefined ? user[key] : incoming);
+  const block = values.block === undefined
+    ? user.block
+    : (profile.isBlock(values.block) ? normalizeText(values.block, 40) : null);
+
   db.run(
-    `UPDATE users SET name = ?, phone = ?, preferred_title = ?, notes = ?, updated_at = datetime('now')
+    `UPDATE users SET name = ?, phone = ?, preferred_title = ?, notes = ?, age = ?, address = ?, block = ?,
+             updated_at = datetime('now')
      WHERE id = ?`,
-    normalizeText(name, 80),
-    normalizePhone(phone) || null,
-    normalizeText(preferredTitle, 24) || null,
-    normalizeMultiline(notes, 500) || null,
+    kept('name', values.name === undefined ? undefined : normalizeText(values.name, 80)),
+    kept('phone', values.phone === undefined ? undefined : normalizePhone(values.phone) || null),
+    kept('preferred_title', values.preferredTitle === undefined ? undefined : normalizeText(values.preferredTitle, 24) || null),
+    kept('notes', values.notes === undefined ? undefined : normalizeMultiline(values.notes, 500) || null),
+    kept('age', values.age === undefined ? undefined : profile.normalizeAge(values.age)),
+    kept('address', values.address === undefined ? undefined : profile.normalizeAddress(values.address) || null),
+    block,
     id,
   );
+  return findById(id);
+}
+
+/** Point the account at its avatar file, or clear the pointer when it is removed. */
+function setPhoto(id, photoPath) {
+  db.run("UPDATE users SET photo_path = ?, updated_at = datetime('now') WHERE id = ?", photoPath || null, id);
   return findById(id);
 }
 
@@ -145,6 +171,7 @@ module.exports = {
   create,
   verifyCredentials,
   updateProfile,
+  setPhoto,
   changePassword,
   recordLogin,
   count,
