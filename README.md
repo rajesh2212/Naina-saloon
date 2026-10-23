@@ -23,6 +23,7 @@ simulated.
 - [Database schema and migrations](#database-schema-and-migrations)
 - [How availability and double-booking prevention work](#how-availability-and-double-booking-prevention-work)
 - [Customer profile completion and the booking gate](#customer-profile-completion-and-the-booking-gate)
+- [Booking tickets (PDF)](#booking-tickets-pdf)
 - [Staff portal (`/portal`)](#staff-portal-portal)
 - [Editing the catalogue, hours and booking rules](#editing-the-catalogue-hours-and-booking-rules)
 - [Security notes](#security-notes)
@@ -37,7 +38,7 @@ simulated.
 
 The project directory was empty, so it needed a full-stack choice rather than a
 framework to follow. It is a **server-rendered Express 4 + EJS 3 app on Node.js,
-with SQLite as the only datastore**, and eight runtime dependencies:
+with SQLite as the only datastore**, and nine runtime dependencies:
 
 | Dependency | Why it is here |
 | --- | --- |
@@ -48,6 +49,7 @@ with SQLite as the only datastore**, and eight runtime dependencies:
 | `helmet` | Security headers, including a strict Content Security Policy. |
 | `express-rate-limit` | Throttling on authentication endpoints. |
 | `nodemailer`, `svg-captcha` | Password-reset mail, and the built-in image CAPTCHA. |
+| `pdf-lib` | The confirmed-booking ticket PDF. Pure JS (no native build, no headless browser), and it writes the file to disk rather than rendering it through a browser the client could tamper with. |
 
 There is no build step, no bundler and no client-side framework: `public/main.js`
 is plain ES5-compatible JavaScript that only *enhances* the booking page. With
@@ -173,7 +175,8 @@ itself in the UI and in `GET /healthz`:
 | `npm run db:setup` | Migrate, then seed. |
 | `npm run create-admin` | Interactive: create the first staff account, or promote an existing email to `admin`. |
 | `npm run slots:generate` | Materialises slot rows for the whole booking horizon (also happens lazily when a day is viewed). |
-| `npm run check` | 73 assertions — booking integrity, the portal guard and the profile/booking gate inside a transaction that is always rolled back, then staff-account and site-detail checks on throwaway rows it deletes — see [Verification](#verification). |
+| `npm run art:ticket` | Rebuilds the small derived copies of the studio's cut-outs that the ticket PDF and the page sprigs use — see [Photography](#photography-and-the-visual-system). |
+| `npm run check` | 83 assertions — booking integrity, the portal guard and the profile/booking gate inside a transaction that is always rolled back, then staff-account, site-detail and ticket checks on throwaway rows and PDFs it deletes — see [Verification](#verification). |
 
 ---
 
@@ -190,25 +193,28 @@ src/
     migrations/001_init.sql
     migrations/002_staff_portal.sql
     migrations/003_profile_completion.sql
+    migrations/004_booking_ticket.sql
     seed.js               settings, hours, catalogue
   lib/
     users.js password.js captcha.js csrf.js session-store.js
     mailer.js validate.js dates.js settings.js slots.js catalogue.js
     profile.js              the seven Blocks, and the maths behind the completion bar
     uploads.js              customer avatars: decode, signature-check, size-cap, name
+    ticket.js               the confirmed-booking PDF: what may be issued, where it lives, how it is drawn
     records.js              staff queries: dashboard snapshot, booking search, roster, day rows
     guards.js flash.js auth-rate-limit.js async.js
   routes/
     public.js             home, services, categories, studio, location, how-to-book, /api/availability
     auth.js               register, login, logout, forgot-password, reset
-    account.js            profile, password change, booking list + cancel
+    account.js            profile, password change, booking list + cancel, ticket download
     booking.js            browse → pick day → pick slot → submit → done
     portal.js             /portal: dashboard, bookings, customers, day sheet, services, settings, details, staff
     admin.js              /admin → 302 to the matching /portal page
 views/                    partials, auth/, pages/, portal/, errors/
 public/                   styles.css, portal.css, main.js, portal.js, favicon.svg, assets/
 public/uploads/avatars/   customer photos, created on first upload (gitignored)
-scripts/                  migrate, seed, create-admin, generate-slots, check
+public/uploads/tickets/   one PDF per confirmed booking, created on confirmation (gitignored)
+scripts/                  migrate, seed, create-admin, generate-slots, ticket-art, check
 data/                     SQLite database + dev outbox (gitignored)
 ```
 
@@ -229,7 +235,7 @@ Migrations are plain numbered SQL files applied once each, tracked in
 | `service_categories` | the 8 groups, with `is_active` and sort order |
 | `services` | name, slug, description, `duration_minutes`, `price_text`, `is_bookable`, `is_active` |
 | `slots` | `slot_date`, `start_time`, `status` (`open`/`blocked`), `block_reason` |
-| `bookings` | slot + user + service, `status` (`pending`/`confirmed`/`cancelled`/`completed`/`no-show`), contact name/phone, note, staff note |
+| `bookings` | slot + user + service, `status` (`pending`/`confirmed`/`cancelled`/`completed`/`no-show`), contact name/phone, note, staff note — plus the ticket columns from migration `004`: `ticket_path`, `ticket_issued_at`, both NULL until staff confirm |
 | `password_resets` | **SHA-256 digest** of the token, user, expiry, used-at |
 
 Passwords are bcrypt cost 12 over a SHA-256 pre-hash (so long passwords cannot
@@ -342,6 +348,55 @@ so in as many words, and it is not presented as an identity or government check.
 
 ---
 
+## Booking tickets (PDF)
+
+A request is a request until someone at the counter says otherwise. The
+confirmation page after `/book` says exactly that — reference number, what was
+asked for, and the words *"This is a request, not yet a confirmation"* — and it
+offers no download, because there is nothing to download yet.
+
+A ticket appears when staff set the booking to **Confirmed** (marking it
+**Served** works too; `TICKET_STATUSES` in `src/lib/ticket.js` is the single list
+the route, the view and the generator all read):
+
+- `POST /portal/bookings/:id/status` confirms first and only then calls
+  `ticket.issue()`. If the PDF cannot be written the confirmation still stands and
+  the flash says so — a broken download must never undo what the studio just did.
+- `/account` and the past-bookings table grow a **Download ticket (PDF)** link, and
+  `GET /account/ticket/:id` streams the file. The route re-reads the booking, so a
+  pending request, somebody else's booking, or an id that does not exist all get the
+  same 404 — no status leak.
+- Staff are exempt from the profile gate but a ticket is still only ever the
+  customer's own copy of their own booking.
+
+**Where the file lives.** `public/uploads/tickets/booking-<id>.pdf`, created on
+demand, one per booking, and `bookings.ticket_path` + `ticket_issued_at` remember
+it. That directory is inside `/public/uploads/`, which is gitignored wholesale: a
+ticket carries a name, a phone number and a photo, so it is customer data, not
+source. Nothing to configure — no environment variable, no external service.
+
+**Repeat downloads are the point.** `ensure()` only writes when the file is
+missing, so a ticket deleted from disk (a fresh checkout, a cleared cache, a
+restore) is regenerated from the live booking row on the next click, and the
+customer's link never dies. A booking taken back to **Cancelled** after
+confirming stops offering its ticket even though the old file is still on disk.
+
+**What is on it.** The salon name, the reference, one green dot beside
+CONFIRMED, service, group, date, time range, duration, the guest's name, the
+number the studio can call, their Block, the price text as it is held (which is
+usually *"at the studio"*, because prices are not published here), the issue
+stamp, the customer's own profile photo when they have one, and the hero portrait
+as a 20%-opacity watermark inside the ticket stub — where the only text is the
+reference, so nothing has to fight it for contrast.
+
+No real stamp or signature is invented: the studio never supplied one, so the
+seal is a drawn double ring captioned *"decorative seal — not an official stamp"*
+and the signature line is left unsigned. The cat and flower cut-outs are the
+supplied studio artwork, shrunk to ticket size so a download is ~150 KB rather
+than 1.8 MB.
+
+---
+
 ## Staff portal (`/portal`)
 
 The counter screen the studio works from. It is a separate route tree with its
@@ -384,6 +439,11 @@ so a future column cannot quietly start leaking into the roster.
 `rejected` and `cancelled` (both free the time again). `pending`, `confirmed`
 and `completed` all hold the slot against a second booking, which is what the
 partial unique index enforces.
+
+Confirming a request — or marking it served — is also the moment its PDF ticket
+is written, so the download a customer sees at `/account` can never appear
+before the studio has accepted the time. See
+[Booking tickets](#booking-tickets-pdf).
 
 ### The salon's clock
 
@@ -549,6 +609,16 @@ the slot).
 - Verified with no horizontal page overflow at 320, 390, 768, 1024 and 1280 px;
   the layout is mobile-first and only ever widens (`min-width` breakpoints at
   820, 900, 940 and 960 px, plus two `max-width` refinements at 560 and 620 px).
+- Choosing a day and a time happens in a centred, rounded `<dialog>` step panel
+  over a dimmed backdrop. It is server-rendered **open**, so with JavaScript off it
+  is simply the next section of the page and the form submits like any other; JS
+  then moves it into the modal sheet. The back control is a real link in the panel's
+  top-left — first it returns to the times, then it closes the panel — and it never
+  clears the chosen day, the chosen time or the typed details, because nothing is
+  stored in the browser.
+- The frangipani sprigs are `aria-hidden`, `pointer-events: none`, sized to fit
+  inside a section's own padding band so they cannot overlap a line of text, and
+  dropped below 860 px and in print.
 - Buttons, links, fields and time tiles are at least 44 px tall; the consent
   checkbox is a 26 px box inside a 44 px row whose label is clickable end to
   end. The date strip and the time grid are large tap targets, and wide tables
@@ -621,6 +691,30 @@ filenames and framing notes.
 
 The boot banner and `npm run check` both report how many slots hold a real
 photograph, so the team can see at a glance what shooting is still outstanding.
+
+### The studio's own cut-outs: frangipani, cat, portrait
+
+Three pictures the studio supplied are decoration rather than photo slots, so
+they live outside the registry above: `public/assets/art/flower-stem.png` (the
+frangipani stem), `cat-cutout.png` (the cat) and `hero-portrait-cutout.png` (the
+hero figure, which is also the hero slot's stand-in). All three arrive as
+transparent PNGs and are placed straight on the page — no mat, no border.
+
+Each one is used through a smaller copy drawn from it, never at full size:
+`flower-accent.png` (150 px wide) is the corner sprig, and
+`ticket-portrait.png` / `ticket-flower.png` / `ticket-cat.png` (240 / 96 / 132 px)
+are embedded in the ticket PDF, which keeps a download around 150 KB instead of
+the 1.8 MB the originals would cost. The originals are the source of truth and
+are committed unchanged; `npm run art:ticket` (`scripts/ticket-art.js`) rebuilds
+every derived copy from them with nothing but Node's own `zlib` — it decodes and
+writes the PNGs itself, downsampling with alpha-weighted colour so a soft edge
+never darkens. Run it again after dropping a new flower, cat or portrait over an
+original.
+
+The sprigs are one `<img>` partial (`views/partials/flower.ejs`) included at a
+corner of each page's main section and the footer: 38–54 px, ~40% opacity, sitting
+inside the section's own padding band so it can never land on a line of text,
+`aria-hidden` and `pointer-events: none`, and removed below 860 px and in print.
 
 ### The hero: wordmark left, portrait right, nothing overlapping
 
@@ -715,39 +809,40 @@ the same row — it was never renamed and it never moves.
 
 ## Verification
 
-`npm run check` opens the database in a transaction it always rolls back (plus a
-throwaway account it deletes) and asserts:
+`npm run check` opens the database in a transaction it always rolls back (plus
+throwaway accounts, staff logins and ticket PDFs it deletes afterwards) and
+asserts:
 
 ```
 PASS  service catalogue seeded — 39 bookable services
 PASS  weekday rows present — 7/7
-PASS  availability comes from the database — 16 free slot(s) on 2026-10-26 for Bridal Makeup
-PASS  first request is created as pending — #3 at 09:00
+PASS  availability comes from the database — 16 free slot(s) on 2026-10-27 for Bridal Makeup
+PASS  first request is created as pending — #9 at 09:00
 PASS  taken slot disappears from availability
-PASS  second request for the same slot is refused
-PASS  unique index blocks a direct duplicate insert
-PASS  staff can confirm a pending request — #3 is confirmed
-PASS  a confirmed slot still refuses a second booking
+PASS  second request for the same slot is refused — Someone has just taken that slot. Please pick another time.
+PASS  unique index blocks a direct duplicate insert — constraint fired
+PASS  staff can confirm a pending request — #9 is confirmed
+PASS  a confirmed slot still refuses a second booking — Someone has just taken that slot. Please pick another time.
 PASS  cancelling frees the booking
 PASS  freed slot is bookable again
-PASS  another account cannot act on someone’s booking
-PASS  staff can mark a request served — #4
+PASS  another account cannot act on someone’s booking — That booking belongs to another account.
+PASS  staff can mark a request served — #10
 PASS  a served appointment keeps its time off the market
 PASS  …but it is not an open booking for the client — 0 open
-PASS  the widened unique index covers served bookings too
+PASS  the widened unique index covers served bookings too — constraint fired
 PASS  the day sheet sees who holds each time — 1 held slot(s)
 PASS  the portal guard lets an admin through
 PASS  …and refuses a signed-in customer
 PASS  …and refuses an anonymous request
 PASS  staff search matches the test requests — 2 hit(s)
 PASS  a hostile filter falls back instead of reaching SQL — newest / all / page 1
-PASS  customer reads never carry a password hash
+PASS  customer reads never carry a password hash — #57
 PASS  a roster filter outside the allowlist is ignored
 PASS  the Block list is the seven around Bhadrak, spelled as the dropdown shows them — 7 entries
-PASS  the bar reads 20 / 40 / 60 / 80 / 80 / 100 as the details land
+PASS  the bar reads 20 / 40 / 60 / 80 / 80 / 100 as the details land — 20 → 40 → 60 → 80 → 80 → 100
 PASS  an address with no Block chosen does not close the profile
 PASS  …and neither does every detail except the name
-PASS  the missing list names what is still to add
+PASS  the missing list names what is still to add — phone number, age, profile photo, address, Block
 PASS  an age of 0 or 200 is never accepted by the maths
 PASS  a Block typed by hand is checked against the list
 PASS  the column accepts every Block the dropdown offers — 7/7
@@ -756,36 +851,52 @@ PASS  the same column guard covers the age — constraint fired
 PASS  a path outside the avatars folder is never treated as one of ours
 PASS  deleting a photo leaves any file it does not own alone
 PASS  real PNG bytes are accepted
-PASS  bytes that are not a picture are refused whatever mime they claim
+PASS  bytes that are not a picture are refused whatever mime they claim — That file is not a picture we can use. Choose a JPEG, PNG or WebP image.
 PASS  junk that is not base64 at all is refused
 PASS  an oversized payload is refused before anything is written
 PASS  an empty pick is a skip, not an error
 PASS  a signed-in customer with an incomplete profile cannot open the booking page — /account/profile
-PASS  …and the booking API answers 403 instead of a redirect a script can follow
+PASS  …and the booking API answers 403 instead of a redirect a script can follow — Your profile is 20% complete. Please add
 PASS  an anonymous request is sent to sign in first
 PASS  staff logins are exempt — they book at the counter
 PASS  a complete profile gets through the gate — 100%
 PASS  …and it closes again the moment one detail is taken back out
 PASS  a save that omits a detail leaves the stored value in place
 PASS  …but a Block the form never offered is dropped rather than written
-PASS  a salon wall time resolves to one real instant — 2026-10-26 10:30 → 2026-10-26T05:00:00Z
+PASS  a salon wall time resolves to one real instant — 2026-10-27 10:30 → 2026-10-27T05:00:00Z
 PASS  an invented zone name is refused rather than guessed — GMT+05:30
 PASS  reset tokens are stored as sha-256 digests
 PASS  changing a password signs every other device out
-PASS  …and drops the account's outstanding reset links
+PASS  …and drops the account’s outstanding reset links
 PASS  the new password is the one that verifies
 PASS  promoting an existing account keeps their own name — Kept Name · admin
 PASS  …and the password they already chose still signs them in
-PASS  the portal can make a staff login
-PASS  the staff list never carries a password hash
+PASS  a staff login with no password for an unknown email is refused — needs a password
+PASS  the portal can make a staff login — #59
+PASS  the staff list never carries a password hash — 3 staff row(s)
 PASS  taking the staff role closes their open portal session
 PASS  switching a login off stops it signing in at all
+PASS  …and drops their outstanding reset links
+PASS  …but leaves the account itself, and its bookings, in place
+PASS  two details report as saved — Salon name, Phone number
 PASS  the saved name wins over the environment value — Naina Beauty Parlour → Check Parlour
 PASS  …and is pushed into the running config, so the header and the mails change without a restart
 PASS  a phone typed by staff rebuilds the tel: link — +919439712995
+PASS  the saved keys are listed as portal-held
 PASS  …and the studio clock row is not swept in with them — salon_name, salon_phone
 PASS  an empty box hands the value back to .env — Naina Beauty Parlour
-73/73 checks passed.
+PASS  …and every rendered detail has a value to fall back on
+PASS  only a confirmed or served request can carry a ticket — confirmed, completed
+PASS  a pending request is refused a ticket — not-confirmed
+PASS  …and the staff-side issue call throws rather than writing one — That booking is not confirmed.
+PASS  a confirmed request writes a real PDF — 143 KB
+PASS  …and the booking remembers where it lives and when it was issued — /uploads/tickets/booking-9.pdf · 2026-10-23 21:06:44
+PASS  the row carries the owner, so the download route can check who is asking
+PASS  asking twice serves the same file instead of rewriting it
+PASS  a file deleted from disk is regenerated, so the link never dies
+PASS  a booking taken back after confirming stops offering its ticket — not-confirmed
+PASS  the ticket font survives the rupee, the dash and the ellipsis — Rs.1,200 - 3:30 pm - 5:00 pm . "bridal" ...
+83/83 checks passed.
 ```
 
 The portal was then driven over **real HTTP** against the running server — every
@@ -818,6 +929,23 @@ over HTTP, and booking opens. Deleting the photo closes the gate again on the
 same request. The header is checked in the same run: no booking button, an
 account icon, **Staff area** still present, and the three-way
 sign-in / register / forgot-password switch carrying `?next=`.
+
+The ticket was driven over **real HTTP** too, against a live booking rather than
+a fixture: once staff confirm, `GET /account/ticket/<id>` answers with a real
+`application/pdf` and a download filename, the same link keeps working on every
+visit afterwards without the file being rewritten, and a *pending* request,
+another account's booking and an id that does not exist each answer 404 while an
+anonymous visitor is sent to sign in. Replaying the booking `POST` is refused
+server-side with the "someone has just taken that slot" 409 instead of writing a
+second row, and the confirmation page renders the reference with no download
+button and no "What happens next" section — there is nothing to download yet.
+In a real browser, the free times open in the centred rounded `<dialog>` step
+panel, its back control returns to the times and then closes the panel without
+clearing the chosen day, the chosen time or the typed details, and the submit
+button is disabled until a time is picked and stays disabled while the request
+is on its way. The frangipani sprigs were measured line by line against the text
+of every page that carries one — no collision at any width from 880 to 1440 px,
+and they are dropped below 860 px.
 
 Beyond the script, the whole flow was re-run against a **wiped database** using
 only the documented commands (`npm run db:setup`, `npm run create-admin`,
