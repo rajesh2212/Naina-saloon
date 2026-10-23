@@ -30,6 +30,9 @@
             <% } else { %>
               <li class="nav__auth"><a class="nav__link" href="/auth/login">Sign in</a></li>
               <li class="nav__auth"><a class="nav__link" href="/auth/register">Create an account</a></li>
+              <%# The staff entry point. It is a convenience, not a control: the portal
+                  checks the role in the database on every request, whoever clicks this. %>
+              <li class="nav__auth"><a class="nav__link" href="/auth/login?next=/portal">Staff login</a></li>
             <% } %>
           </ul>
         </nav>
@@ -53,6 +56,7 @@
             <% if (isAdmin) { %><a class="btn btn--primary btn--sm header-cta__auth" href="/portal">Staff area</a><% } %>
           <% } else { %>
             <a class="btn btn--ghost btn--sm header-cta__auth" href="/auth/login">Sign in</a>
+            <a class="btn btn--ghost btn--sm header-cta__auth" href="/auth/login?next=/portal">Staff</a>
           <% } %>
           <a class="btn btn--sm" href="/book"><span class="btn__label--long">Book an appointment</span><span class="btn__label--short">Book</span></a>
         </div>
