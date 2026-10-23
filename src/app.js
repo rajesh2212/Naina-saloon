@@ -112,6 +112,11 @@ function createApp() {
     }),
   );
 
+  // The avatar field on /account/profile carries a browser-resized picture as
+  // base64, which is far more than the 100kb every other form on the site needs.
+  // Only this one endpoint asks for the larger body, and it still caps at a few
+  // hundred kilobytes before src/lib/uploads.js looks at the bytes.
+  app.use('/account/profile', express.urlencoded({ extended: false, limit: '800kb' }));
   app.use(express.urlencoded({ extended: false, limit: '100kb' }));
   app.use(express.json({ limit: '20kb' }));
 
@@ -218,17 +223,25 @@ function createApp() {
     if (status >= 500) {
       console.error('[error]', error.stack || error.message);
     }
+    // body-parser says "request entity too large"; say what to do about it.
+    const tooBig = status === 413 ? 'That photo is too large. Choose a smaller one, or save the other details.' : null;
     if (req.accepts(['html', 'json']) === 'json') {
       return res.status(status).json({
         ok: false,
-        error: status >= 500 ? 'Something went wrong at our end. Please try again.' : error.message,
+        error:
+          tooBig ||
+          (status >= 500 ? 'Something went wrong at our end. Please try again.' : error.message),
       });
     }
     req.session = req.session || {};
     res.status(status);
     return res.render('errors/message', {
       title: status >= 500 ? 'Something went wrong' : 'Please check that',
-      message: status >= 500 ? 'Something went wrong at our end. Please try again, or call the studio.' : error.message,
+      message:
+        tooBig ||
+        (status >= 500
+          ? 'Something went wrong at our end. Please try again, or call the studio.'
+          : error.message),
       status,
     });
   });

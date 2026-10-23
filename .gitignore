@@ -5,6 +5,10 @@
 *.db-wal
 *.db-shm
 
+# Customer avatars uploaded through /account/profile. These are real faces tied
+# to real accounts, so they stay on the server that took them.
+/public/uploads/
+
 # Local secrets
 .env
 .env.*
