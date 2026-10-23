@@ -1,0 +1,105 @@
+<%- include('partials/head') %>
+
+<%
+  var savedCount = 0;
+  fields.forEach(function (f) { if (f.saved) savedCount++; });
+  function source(f) {
+    return f.saved
+      ? 'Saved here — it wins over ' + f.envName + '.'
+      : 'Coming from ' + f.envName + ' in .env, or the shipped default.';
+  }
+  function inputType(f) {
+    if (f.phone) return 'tel';
+    if (f.email) return 'email';
+    if (f.url) return 'url';
+    if (f.year) return 'text';
+    return 'text';
+  }
+%>
+
+<div class="p-head">
+  <div>
+    <p class="p-eyebrow"><%= savedCount ? savedCount + ' of ' + fields.length + ' saved here' : 'All from .env right now' %></p>
+    <h1>Site details</h1>
+    <p>
+      The studio&rsquo;s own words: the name in the header, the number the call button dials, the address in the footer
+      and the maps link. These are the values <code>.env</code> normally carries; saving one here stores it in the same
+      database as the diary and it takes over immediately &mdash; no restart, no editing of a file on the server.
+    </p>
+  </div>
+  <div class="p-actions">
+    <a class="btn" href="/portal/settings">Hours, booking rules, studio clock</a>
+    <a class="btn btn--primary" href="/portal/staff">Staff logins</a>
+  </div>
+</div>
+
+<section class="p-card p-card--accent" aria-labelledby="details-form">
+  <h2 id="details-form" class="p-card__title">What the website says about the studio</h2>
+
+  <form method="post" action="/portal/details" data-guarded>
+    <%- csrfField() %>
+
+    <% fields.forEach(function (field) { %>
+      <div class="p-field">
+        <label for="<%= field.key %>">
+          <%= field.label %>
+          <% if (field.required) { %><span class="p-tag">required</span><% } %>
+        </label>
+        <input id="<%= field.key %>" name="<%= field.key %>" type="<%= inputType(field) %>"
+               value="<%= field.value %>" maxlength="<%= field.max %>"
+               autocomplete="off" <% if (field.year) { %>inputmode="numeric" pattern="\d{4}"<% } %>>
+        <p class="p-hint">
+          <%= source(field) %>
+          <% if (field.saved) { %>The <code>.env</code> value underneath it is <code><%= field.envValue %></code> &mdash; clearing this box goes back to that.<% } %>
+          <% if (field.phone) { %>Digits, spaces, brackets and a leading <code>+</code> are fine; the <code>tel:</code> link is built from it.<% } %>
+          <% if (field.email) { %>Leave empty if the studio does not want a copy of each booking by mail.<% } %>
+          <% if (field.url) { %>A full <code>https://</code> link; the &ldquo;Find us&rdquo; button opens it.<% } %>
+          <% if (field.year) { %>Four digits. It only ever appears in the &ldquo;since&rdquo; line.<% } %>
+        </p>
+      </div>
+    <% }) %>
+
+    <div class="p-form-actions">
+      <button class="btn btn--primary" type="submit">Save these details</button>
+      <span class="p-loading" aria-hidden="true"><span class="p-spin"></span> Saving</span>
+    </div>
+  </form>
+
+  <p class="p-note">
+    Every box is checked on the server before anything is written: a phone number with too few digits, a maps link
+    without <code>https://</code>, or a four-digit year that is not a year is refused and named in the message, and the
+    details that were fine are still saved. Nothing is stored that the website would then show wrong. Clearing a box
+    does not blank the site &mdash; it hands that one value back to <code>.env</code>, which every field here has
+    underneath it.
+  </p>
+</section>
+
+<section class="p-card p-card--flat" aria-labelledby="stays">
+  <h2 id="stays" class="p-card__title">What stays in <code>.env</code>, on purpose</h2>
+  <dl class="p-summary">
+    <dt>SESSION_SECRET</dt>
+    <dd>
+      <%= wiring.sessionSecret %>. It signs every staff and customer cookie. A copy of the database would then contain
+      a usable signing key, so it is never typed into a form or stored in a row.
+    </dd>
+    <dt>SMTP_HOST and SMTP_PASS</dt>
+    <dd>
+      <%= wiring.smtp %>. Mail credentials belong in the environment for the same reason &mdash; set them in
+      <code>.env</code> and restart, and this portal reports whether they are working.
+    </dd>
+    <dt>TURNSTILE_SECRET_KEY</dt>
+    <dd>
+      <%= site.captcha.label %>. <%= site.captcha.note %>
+    </dd>
+    <dt>Public address</dt>
+    <dd><code><%= wiring.publicUrl %></code> &mdash; from <code>PUBLIC_APP_URL</code>. Password-reset links are built with it.</dd>
+    <dt>Database file</dt>
+    <dd><code><%= wiring.databaseFile %></code></dd>
+  </dl>
+  <p class="p-hint">
+    If the studio&rsquo;s name, number or address changes, change it here. If a key or a password changes, that is an
+    <code>.env</code> edit on the machine running the site.
+  </p>
+</section>
+
+<%- include('partials/foot') %>

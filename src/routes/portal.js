@@ -22,6 +22,7 @@ const dates = require('../lib/dates');
 const studio = require('../lib/settings');
 const slots = require('../lib/slots');
 const records = require('../lib/records');
+const users = require('../lib/users');
 const v = require('../lib/validate');
 const { flash } = require('../lib/flash');
 const { requireAdmin } = require('../lib/guards');
@@ -32,8 +33,9 @@ const NAV = [
   { href: '/portal', label: 'Dashboard' },
   { href: '/portal/bookings', label: 'Bookings' },
   { href: '/portal/customers', label: 'Customers' },
-  { href: '/portal/settings', label: 'Hours & settings' },
   { href: '/portal/services', label: 'Services' },
+  { href: '/portal/settings', label: 'Hours & settings' },
+  { href: '/portal/details', label: 'Site details' },
 ];
 
 const STATUS_LABELS = {
@@ -365,6 +367,95 @@ router.post('/settings/hours', (req, res) => {
     flash.error(req, `${error.message} ${dates.WEEKDAY_LABELS[weekday]} was left as it was.`);
   }
   return res.redirect('/portal/settings');
+});
+
+// -------------------------------------------------------------- site details
+/**
+ * The business details a studio would otherwise edit in `.env`. A saved row wins
+ * over the environment variable of the same name, and clearing a box hands that
+ * value back to `.env` — which is why every field says where it is coming from.
+ *
+ * Secrets are deliberately not on this form. A session-signing key or an SMTP
+ * password typed into a web page ends up inside a database file that gets
+ * copied and backed up, so those stay in the environment.
+ */
+router.get('/details', (req, res) => {
+  const saved = studio.savedDetailKeys();
+  const current = studio.salonDetails();
+  return res.render('portal/details', {
+    title: 'Site details',
+    view: 'details',
+    fields: studio.DETAIL_FIELDS.map((field) => ({
+      ...field,
+      envName: field.key.toUpperCase(),
+      envValue: studio.baseDetail(field.field),
+      value: current[field.field],
+      saved: saved.has(field.key),
+    })),
+    wiring: {
+      sessionSecret: config.session.secret ? 'set from .env' : 'not set — using the development fallback',
+      smtp: config.mail.host ? `host ${config.mail.host}` : 'no SMTP_HOST in .env',
+      publicUrl: config.http.publicUrl,
+      databaseFile: config.db.file,
+    },
+  });
+});
+
+router.post('/details', (req, res) => {
+  const problems = [];
+  const values = {};
+
+  for (const field of studio.DETAIL_FIELDS) {
+    const raw = req.body[field.key];
+    if (raw === undefined) continue;
+    const text = String(raw).replace(/[\u0000-\u001F\u007F]/g, ' ').trim();
+
+    if (!text) {
+      // An empty box means "hand this one back to .env", which is only safe when
+      // there is something to hand back to. `required` fields are rendered on
+      // every page, so they may not end up blank in either layer.
+      if (field.required && !studio.baseDetail(field.field)) {
+        problems.push(
+          `${field.label} cannot be empty — it is used in the header, the page title and every mail the studio sends, and there is no .env value to fall back on`,
+        );
+        continue;
+      }
+      values[field.key] = '';
+      continue;
+    }
+    if (text.length > field.max) {
+      problems.push(`${field.label} is ${text.length} characters; the limit is ${field.max}`);
+      continue;
+    }
+
+    let error = null;
+    if (field.phone) error = v.phoneError(text, { required: true });
+    else if (field.email) error = v.emailError(text);
+    else if (field.url && !/^https?:\/\/\S+$/i.test(text)) error = 'The Maps link has to start with http:// or https://';
+    else if (field.year && !/^\d{4}$/.test(text)) error = 'Use a four-digit year, like 2018';
+    else if (field.year && (Number(text) < 1900 || Number(text) > new Date().getFullYear() + 1)) {
+      error = `That year is not believable — use 1900 to ${new Date().getFullYear() + 1}`;
+    }
+    if (error) {
+      problems.push(`${field.label} — ${error}`);
+      continue;
+    }
+    values[field.key] = v.normalizeText(text, field.max);
+  }
+
+  const written = studio.saveSalonDetails(values);
+  if (!written.length) {
+    flash.error(req, problems.length ? `Nothing was saved. ${problems.join(' ')}` : 'Nothing changed — every box already held that value.');
+    return res.redirect('/portal/details');
+  }
+  const now = studio.salonDetails();
+  flash.success(
+    req,
+    `Saved ${written.join(', ')}. The header now reads “${now.name}”, the call button dials ${now.phone},` +
+      ' and the mails carry the same details. ' +
+      (problems.length ? `Left as they were: ${problems.join(' ')}` : ''),
+  );
+  return res.redirect('/portal/details');
 });
 
 module.exports = router;
