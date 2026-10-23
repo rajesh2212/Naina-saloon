@@ -23,7 +23,7 @@ this project.
 
 | Group | Filenames | Where it appears |
 | --- | --- | --- |
-| Hero portrait | `naina-hero-portrait.png` | Home hero, overlapping the NAINA wordmark |
+| Hero portrait | `naina-hero-portrait.png` | Home hero — a transparent cutout laid under the NAINA wordmark |
 | The studio | `naina-about-1.png` `naina-about-2.png` `naina-about-3.png` | Home → About the salon; `about-3` also sits in the gallery |
 | Your visit | `naina-visit-1.png` … `naina-visit-4.png` | Home → Your visit, the four steps |
 | Service groups | `naina-service-bridal.png` `naina-service-hair.png` `naina-service-facial.png` `naina-service-eye.png` `naina-service-treatment.png` | Home → What the studio works on |
@@ -34,14 +34,25 @@ slot pairs the photograph filename with the artwork that stands in for it. Add a
 slot there and a matching `include('../partials/photo', …)` in the page to use
 it.
 
+One slot carries `cutout: true` (the hero). That flag tells the page the picture
+has its own transparency: it is laid straight on the background with no white
+mat, border, rounded corner or shadow, and the oversized NAINA wordmark is
+painted over it in a peach that fades to clear. A rectangular photograph dropped
+into a cutout slot therefore renders unframed, so either supply the hero as a
+cut-out PNG or drop the flag in `src/config.js` and restart the server.
+
 `npm run check` and the staff area's integration card both report how many of
 the 18 slots hold a real photograph.
 
 ## Shooting guidance
 
-- **Hero portrait** — portrait orientation, at least 1000 × 1250 px. It is
-  cropped to 4:5 and sits over the wordmark, so keep the face in the upper two
-  thirds.
+- **Hero portrait** — portrait orientation, at least 1000 × 1250 px, cut out from
+  its background. Nothing crops it, so the transparency in the file is exactly
+  what shows. Keep the eyes no higher than about 40% down the picture: the
+  wordmark's baseline lands across the top of the head, and the letters fade out
+  before they reach the eyes. Leave the empty space around the figure transparent
+  rather than trimming it tight — that margin is what lets her overlap the header
+  and the copy without covering either.
 - **Everything else** — 1200 px on the long edge is plenty. Panels are rounded
   and cropped to 4:3, 3:2, 1:1 or 3:4, so keep faces and product away from the
   edges.

@@ -391,6 +391,20 @@ The boot banner and `npm run check` both report how many slots hold a real
 photograph, so the team can see what shooting is still outstanding; the admin
 "Studio diary" screen lists the exact filenames that are missing.
 
+### The hero portrait is a cutout, not a card
+
+The hero's picture carries its own transparency: no mat, border, rounded corner
+or shadow, so the figure sits straight on the white-to-peach gradient. The
+oversized `NAINA` wordmark is painted *over* her, filled with a peach gradient
+that fades to clear before the letters reach their feet, so the strokes crossing
+her hair stay legible without erasing the face behind them. She is the bottom
+layer, the wordmark the middle one and the copy the top one, which is why the
+headline and the booking buttons survive any width the picture reaches; the
+figure's box is `pointer-events: none` on desktop, where it is taken out of the
+grid and positioned over the text column. Her size, lift and sideways shift are
+all derived from one custom property (`--fig-w`), so the composition scales
+instead of drifting at the widths where the size cap binds.
+
 ### One-row header below the desktop cursor
 
 A sticky header that stacks the brand, the menu button and two buttons over

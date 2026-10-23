@@ -23,6 +23,20 @@ function span(range) {
 <section class="hero" aria-labelledby="hero-title">
   <p class="hero__word" aria-hidden="true">NAINA</p>
 
+  <div class="hero__media">
+    <%- include('../partials/photo', {
+      photo: site.photos.hero[0],
+      ratio: '45',
+      eager: true,
+      label: 'At the chair',
+      alt: 'a bridal beauty portrait, standing in for the studio’s own photograph.'
+    }) %>
+    <p class="hero__badge">
+      <strong>Opens at <%= salon.opensAtLabel %></strong>
+      The diary below shows only the hours the team has opened.
+    </p>
+  </div>
+
   <div class="wrap hero__inner">
     <div class="hero__copy">
       <p class="eyebrow-pill"><span class="eyebrow-pill__star" aria-hidden="true">&#10022;</span> Jagannathpur, Bhadrak &middot; since <%= salon.since %></p>
@@ -38,20 +52,6 @@ function span(range) {
       <p class="hero__note">
         Requests go straight to the studio team, who confirm the time. Nothing is charged on this
         website. For a same-day time, call <a href="tel:<%= salon.phoneHref %>"><%= salon.phone %></a>.
-      </p>
-    </div>
-
-    <div class="hero__media">
-      <%- include('../partials/photo', {
-        photo: site.photos.hero[0],
-        ratio: '45',
-        eager: true,
-        label: 'At the chair',
-        alt: 'a bridal beauty portrait, standing in for the studio’s own photograph.'
-      }) %>
-      <p class="hero__badge">
-        <strong>Opens at <%= salon.opensAtLabel %></strong>
-        The diary below shows only the hours the team has opened.
       </p>
     </div>
   </div>

@@ -16,13 +16,13 @@ const showHint = !site.isProduction || isAdmin;
 const loadAttr = typeof eager !== 'undefined' && eager ? 'eager' : 'lazy';
 %>
 <% if (photo.present) { %>
-  <img class="photo <%= ratioClass %>"
+  <img class="photo <%= ratioClass %><%= photo.cutout ? ' photo--cutout' : '' %>"
        src="<%= photo.src %>"
        alt="<%= alt %>"
        loading="<%= loadAttr %>"
        decoding="async">
 <% } else if (photo.artSrc) { %>
-  <span class="shot <%= ratioClass %>">
+  <span class="shot <%= ratioClass %><%= photo.cutout ? ' shot--cutout' : '' %>">
     <img class="shot__img"
          src="<%= photo.artSrc %>"
          alt="Illustrative image — <%= alt %>"

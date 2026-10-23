@@ -93,8 +93,10 @@ const config = {
   // photograph, dropped into public/assets/; `art` is the generated illustrative
   // stand-in in public/assets/art/ that shows until then. A slot with neither
   // falls back to a labelled placeholder panel, so nothing is ever blank.
+  // `cutout: true` means the picture carries its own alpha and is laid straight on
+  // the page instead of into a framed print.
   photoSlots: {
-    hero: [{ file: 'naina-hero-portrait.png', art: 'hero-portrait.jpg' }],
+    hero: [{ file: 'naina-hero-portrait.png', art: 'hero-portrait-cutout.png', cutout: true }],
     about: [
       { file: 'naina-about-1.png', art: 'about-1-chair.jpg' },
       { file: 'naina-about-2.png', art: 'about-2-counter.jpg' },
@@ -179,7 +181,7 @@ function photoSlots() {
   const dir = path.join(ROOT, 'public', 'assets');
   const groups = {};
   for (const [group, slots] of Object.entries(config.photoSlots)) {
-    groups[group] = slots.map(({ file, art }) => {
+    groups[group] = slots.map(({ file, art, cutout }) => {
       const present = fs.existsSync(path.join(dir, file));
       const artPresent = Boolean(art) && fs.existsSync(path.join(dir, 'art', art));
       return {
@@ -188,6 +190,7 @@ function photoSlots() {
         present,
         art: art || null,
         artSrc: artPresent ? `/assets/art/${art}` : null,
+        cutout: Boolean(cutout),
       };
     });
   }

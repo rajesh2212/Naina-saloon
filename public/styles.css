@@ -368,6 +368,12 @@ li { margin: 0 0 .35em; }
    The copy sits in the pale band and the stats in the peach, so near-black text
    never has to fight a saturated background. */
 .hero {
+  --fig-w: min(86vw, 430px);
+  /* The lift is a share of her own width, not of the viewport: the width is capped,
+     so a viewport-unit lift keeps climbing past that cap and pushes the top of her
+     head out through the hero's clipped edge. */
+  --fig-lift: calc(var(--fig-w) * .56);
+  --fig-x: calc(var(--fig-w) * .07);
   position: relative;
   isolation: isolate;
   overflow: hidden;
@@ -376,25 +382,48 @@ li { margin: 0 0 .35em; }
 }
 /* The oversized wordmark is decoration, never content. It is in normal flow
    rather than absolutely positioned so the copy below can never collide with a
-   letter at an unforeseen width — the portrait is what overlaps it, pulled up
-   with a negative margin, which is the composition the reference opens on. */
+   letter at an unforeseen width. It is painted OVER the portrait: the peach is
+   clipped to the glyphs and fades to clear toward the hem, so where a letter
+   crosses her face the picture shows through the stroke instead of being cut
+   out by it. Nothing solid sits behind the word. */
 .hero__word {
+  position: relative;
+  z-index: 2;
   margin: clamp(1.25rem, 4vw, 2.5rem) 0 0;
   text-align: center;
   font-family: var(--serif);
-  font-size: clamp(4.5rem, 22vw, 13rem);
+  /* The floor and the slope keep the ink narrower than the content box on the
+     smallest phones, so the two never have to fight over the same few pixels. */
+  font-size: clamp(3.75rem, 20.5vw, 13rem);
   font-weight: 500;
   line-height: .82;
-  letter-spacing: .05em;
+  letter-spacing: .08em;
   color: #eab48b;
   user-select: none;
 }
+/* Guarded: without a working `background-clip: text` the transparent fill would
+   simply erase the wordmark, so those browsers keep the flat peach. */
+@supports ((-webkit-background-clip: text) or (background-clip: text)) {
+  .hero__word {
+    color: transparent;
+    background-image: linear-gradient(178deg,
+      #f0b489 0%,
+      rgba(238, 169, 129, .84) 34%,
+      rgba(237, 167, 127, .46) 66%,
+      rgba(236, 166, 126, .08) 100%);
+    -webkit-background-clip: text;
+    background-clip: text;
+  }
+}
 .hero__inner {
   position: relative;
-  z-index: 1;
+  /* Always above both the wordmark and the portrait: the running text and the
+     booking buttons are the only things in here that carry meaning. */
+  z-index: 3;
   display: grid;
   gap: clamp(1.5rem, 4vw, 3rem);
   align-items: start;
+  margin-top: var(--fig-lift);
 }
 .hero h1 { color: var(--ink); font-size: clamp(2rem, 1.3rem + 3.2vw, 3.4rem); margin-bottom: .45em; }
 /* No max-width here: a `ch` cap on the column also caps the oversized headline,
@@ -404,20 +433,52 @@ li { margin: 0 0 .35em; }
 .hero__actions { display: flex; flex-wrap: wrap; gap: .75rem; }
 .hero__note { margin-top: 1.25rem; font-size: .88rem; color: var(--muted); max-width: 48ch; }
 
-/* The portrait is a print laid over the wordmark: white mat, deep soft shadow,
-   and enough negative margin to break into the letters behind it. */
+/* The figure is a cutout carrying its own alpha, so it is placed by where she
+   actually is rather than by the edge of a box: the picture's transparent margins
+   overlap the header and the copy column freely because they cover nothing.
+   Stacked regimes centre her box first, then `--fig-x` slides it toward the right
+   of the wordmark — her crown is a narrow peak, so on a small screen it can only
+   reach the two middle letters by leaning on the later pair. */
 .hero__media {
   position: relative;
-  order: -1;
-  margin-top: -1.75rem;
-  max-width: 360px;
+  /* The bottom layer of the hero's three: she is painted first, the wordmark washes
+     over her, the copy over both. */
+  z-index: 1;
+  /* Lifted into the wordmark by `--fig-lift`; the copy underneath is pushed down by
+     the same amount, so she rises into the letters without dragging the headline up
+     onto her own shoulders. */
+  margin-top: calc(-1 * var(--fig-lift));
+  width: var(--fig-w);
   margin-inline: auto;
+  transform: translateX(var(--fig-x));
 }
-.hero__media .ph, .hero__media .photo, .hero__media .shot {
+/* A cutout gets no mat, no border, no shadow and no clip — she sits straight on the
+   gradient. Slots that are not flagged `cutout` keep the print frame, and so does the
+   empty labelled panel, because that is the one thing in here that does need one.
+   The flag belongs to the slot rather than the file: a rectangular photograph dropped
+   into the hero's slot arrives unframed too, until `cutout` comes off it in config. */
+.hero__media .ph,
+.hero__media .photo:not(.photo--cutout),
+.hero__media .shot:not(.shot--cutout) {
   border-radius: 26px;
   box-shadow: var(--shadow-lg);
   border: 6px solid var(--panel);
 }
+/* Doubled up because the slot styles below declare `.shot` and `.photo` after this
+   file's hero block: at one class each they would win on order alone and hand the
+   cutout back its blush panel and rounded corners. */
+.shot.shot--cutout,
+.photo.photo--cutout {
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+  background: none;
+  overflow: visible;
+  aspect-ratio: auto;
+}
+/* Let the picture keep its own proportions instead of being cropped to a frame. */
+.photo.photo--cutout,
+.shot.shot--cutout .shot__img { height: auto; object-fit: fill; }
 .hero__badge {
   position: absolute;
   left: clamp(.5rem, 2vw, 1.25rem);
@@ -451,18 +512,55 @@ li { margin: 0 0 .35em; }
 .stat-card span { display: block; margin-top: .25rem; font-size: .86rem; color: var(--ink-soft); }
 .stat-card em { display: block; margin-top: .5rem; font-style: normal; font-size: .76rem; color: var(--muted); }
 
+/* Tablet: she is still stacked between the wordmark and the copy, only larger. */
+@media (min-width: 621px) and (max-width: 959.98px) {
+  .hero { --fig-w: min(66vw, 560px); --fig-lift: calc(var(--fig-w) * .61); --fig-x: calc(var(--fig-w) * .09); }
+  .hero__word { margin-top: 1.75rem; }
+}
+
+/* Desktop: the figure leaves the grid entirely. Her box is placed off the hero's
+   centre — the same centre the wordmark is centred on — so her crown rises under the
+   wordmark's fourth and fifth letters while "N A I" reads clear to the left of her.
+   Those two letters now sit on top of her hair, fading out before their feet do.
+   The transparent margins around her are what overlap the header and the copy, which
+   is why the box can be pulled up past the top of the hero without covering anything:
+   `overflow: hidden` on `.hero` only ever clips empty pixels. She is painted under
+   the copy, so if a wider picture ever reaches the text, the text wins. */
 @media (min-width: 960px) {
-  .hero__inner { grid-template-columns: minmax(0, 1fr) minmax(0, .8fr); }
-  /* Copy reads first on the left; the portrait takes the right column and rises
-     further into the wordmark because there is more of it to show. */
-  .hero__media { order: 0; margin-top: -6.5rem; margin-inline: 0; max-width: none; }
+  .hero { --fig-w: min(700px, 69vw); }
+  .hero__word { margin-top: 2.25rem; }
+  /* The copy column is ~532px from 1280 up, so the headline keeps its three-line
+     break only if the type tracks the column. */
+  .hero h1 { font-size: clamp(2rem, 4.2vw, 3.35rem); }
+  .hero__inner {
+    margin-top: 0;
+    grid-template-columns: minmax(0, calc(50% - 17px));
+  }
+  .hero__media {
+    position: absolute;
+    top: calc(36px + min(21px, 2.07vw) - .341 * var(--fig-w));
+    left: calc(50% - min(130px, 12.8vw));
+    width: var(--fig-w);
+    margin: 0;
+    /* `left` does the horizontal work here, so the stacked shift must not stack on top of it. */
+    transform: none;
+    z-index: 1;
+    /* A cutout's empty half still boxes the headline and the booking button, and a
+       box swallows clicks whether it is painted or not. Nothing here is a control. */
+    pointer-events: none;
+  }
+}
+
+/* Once she has a box of her own to sit in, the badge can hug its corner. Over a
+   cutout the bottom-left corner belongs to the `Illustrative` chip, so from 700px
+   up the badge stands off it to the right. */
+@media (min-width: 700px) {
+  .hero__badge { left: 24%; max-width: 46%; }
 }
 
 /* On a narrow screen the overlay badge sat on top of most of the portrait, so
-   below this width it stops floating and simply sits under the image. The frame
-   also narrows, which lets the flanking letters of the wordmark stay readable. */
-@media (max-width: 620px) {
-  .hero__media { max-width: 300px; }
+   below this width it stops floating and simply sits under the image. */
+@media (max-width: 699.98px) {
   .hero__badge {
     position: static;
     max-width: none;
