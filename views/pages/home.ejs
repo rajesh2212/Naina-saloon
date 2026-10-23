@@ -75,7 +75,8 @@ function span(range) {
   </div>
 </section>
 
-<section class="section" id="about" aria-labelledby="about-title">
+<section class="section section--flower" id="about" aria-labelledby="about-title">
+  <%- include('../partials/flower', { pos: 'tr' }) %>
   <div class="wrap split">
     <div>
       <p class="eyebrow-pill"><span class="eyebrow-pill__star" aria-hidden="true">&#10022;</span> About the salon</p>
@@ -206,7 +207,8 @@ function span(range) {
   </div>
 </section>
 
-<section class="section section--blush" id="pricing" aria-labelledby="pricing-title">
+<section class="section section--blush section--flower" id="pricing" aria-labelledby="pricing-title">
+  <%- include('../partials/flower', { pos: 'br' }) %>
   <div class="wrap">
     <div class="sec-head sec-head--split">
       <p class="eyebrow-pill"><span class="eyebrow-pill__star" aria-hidden="true">&#10022;</span> Pricing</p>

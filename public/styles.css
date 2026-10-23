@@ -1119,10 +1119,9 @@ legend { font-weight: 650; font-size: .95rem; padding: 0; margin-bottom: .6rem; 
 
 /* ---------- alerts / flash ------------------------------------------------ */
 .alerts { display: grid; gap: .6rem; }
+/* Alerts hold prose with inline links and <strong>s inside it, so they must stay
+   in normal text flow — flexing them turns each fragment into its own column. */
 .alert {
-  display: flex;
-  gap: .6rem;
-  align-items: flex-start;
   padding: .8rem 1rem;
   border-radius: var(--radius-sm);
   border: 1px solid var(--line);
@@ -1167,6 +1166,96 @@ legend { font-weight: 650; font-size: .95rem; padding: 0; margin-bottom: .6rem; 
   .booking-layout > .aside { position: sticky; top: 88px; }
 }
 
+/* The step panel: everything after “Show free times” arrives as one centred,
+   deep-cornered sheet over a dimmed page. It is a real <dialog> rendered with
+   `open`, so with JavaScript off it simply stays a card in the flow and the form
+   below it posts unchanged — the sheet is presentation, never the only way in. */
+.steppanel {
+  width: min(100% - 1.5rem, 1040px);
+  margin-block: clamp(1.5rem, 5vw, 3.5rem);
+  margin-inline: auto;
+  padding: clamp(1rem, 3vw, 1.75rem);
+  border: 1px solid var(--line);
+  border-radius: 30px;
+  background: var(--bg);
+  color: var(--ink);
+}
+.steppanel[data-modal] {
+  max-height: min(88dvh, 940px);
+  overflow-x: hidden;
+  overflow-y: auto;
+  border: 0;
+  box-shadow: 0 28px 70px -24px rgba(36, 26, 21, .5);
+  overscroll-behavior: contain;
+}
+.steppanel::backdrop {
+  background: rgba(36, 26, 21, .58);
+  backdrop-filter: blur(3px);
+}
+.steppanel__bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: .75rem;
+  margin-bottom: 1rem;
+  padding-bottom: .85rem;
+  border-bottom: 1px solid var(--line);
+}
+.steppanel__back {
+  display: inline-flex;
+  align-items: center;
+  gap: .4rem;
+  min-height: var(--tap);
+  padding: .5rem 1rem .5rem .65rem;
+  border: 1.5px solid var(--line-strong);
+  border-radius: 999px;
+  background: var(--panel);
+  color: var(--teal-deep);
+  font-size: .92rem;
+  font-weight: 650;
+  text-decoration: none;
+}
+.steppanel__back:hover { border-color: var(--teal); background: var(--teal-soft); }
+.steppanel__back:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
+.steppanel__back .icon { width: 18px; height: 18px; flex: none; }
+.steppanel__where {
+  display: grid;
+  gap: .1rem;
+  margin: 0;
+  text-align: right;
+  color: var(--muted);
+}
+.steppanel__where strong { color: var(--ink); font-size: 1rem; }
+@media (max-width: 560px) {
+  .steppanel { border-radius: 22px; }
+  .steppanel__where { text-align: left; }
+}
+
+/* The reference the counter asks for, set apart so it can be read off a screen. */
+.done__ref {
+  display: inline-grid;
+  gap: .1rem;
+  margin-block: 1.1rem .2rem;
+  padding: .65rem 1.35rem .8rem;
+  border: 1.5px dashed var(--line-strong);
+  border-radius: var(--radius);
+  background: var(--panel);
+}
+.done__ref-label {
+  font-size: .7rem;
+  font-weight: 600;
+  letter-spacing: .09em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.done__ref strong {
+  font-family: var(--serif);
+  font-size: 2.1rem;
+  line-height: 1.1;
+  color: var(--teal-deep);
+}
+
 .picker {
   display: flex;
   gap: .5rem;
@@ -1175,6 +1264,7 @@ legend { font-weight: 650; font-size: .95rem; padding: 0; margin-bottom: .6rem; 
   scroll-snap-type: x proximity;
   -webkit-overflow-scrolling: touch;
 }
+
 .picker__item {
   flex: none;
   scroll-snap-align: start;
@@ -1382,6 +1472,37 @@ td .btn { margin: .15rem .2rem .15rem 0; }
   overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0;
 }
 .minimal-page { min-height: 100vh; display: flex; flex-direction: column; }
+
+/* ---------- decorative flower sprigs -------------------------------------- */
+/* The sprig is the studio's own frangipani cut-out, used as a corner ornament. It
+   is sized to sit inside a section's own padding band — `top` puts the band's
+   mid-line under its centre — so it can never overlap a line of text, and it is
+   absolutely positioned so it cannot shift one either. `.section--flower` opts a
+   section in rather than making every section a containing block. Below 860px the
+   band is the only space there is, so the sprig is dropped; print loses it too,
+   because 40%-opacity colour on paper is mud. */
+.section--flower { position: relative; }
+.flower {
+  position: absolute;
+  height: clamp(38px, 4.5vw, 54px);
+  width: auto;
+  opacity: .4;
+  pointer-events: none;
+}
+.flower--tr, .flower--tl { top: calc(clamp(3.5rem, 8vw, 6.5rem) / 2); translate: 0 -50%; }
+.flower--br, .flower--bl { bottom: calc(clamp(3.5rem, 8vw, 6.5rem) / 2); translate: 0 50%; }
+.flower--tr, .flower--br { right: clamp(1rem, 4vw, 2.5rem); rotate: 6deg; }
+.flower--tl, .flower--bl { left: clamp(1rem, 4vw, 2.5rem); rotate: -8deg; }
+/* The footer's band is shallower than a section's, and the petals are already pale
+   against charcoal, so it needs a smaller sprig and less opacity to read the same. */
+.site-footer { position: relative; }
+.site-footer .flower {
+  top: calc(clamp(2.75rem, 6vw, 4.5rem) / 2);
+  height: 38px;
+  opacity: .22;
+}
+@media (max-width: 860px) { .flower { display: none; } }
+@media print { .flower { display: none; } }
 
 /* The header is sticky, so anchored targets need room to land below it. */
 [id] { scroll-margin-top: 92px; }

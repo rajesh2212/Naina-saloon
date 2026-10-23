@@ -1,0 +1,8 @@
+<%
+  /* A corner sprig of the studio's frangipani. Purely decorative, so it carries no
+     alt text and is hidden from assistive tech; `pos` picks the corner
+     (tr / tl / br / bl) and must match a `.flower--*` rule in styles.css. */
+  var spot = typeof pos === 'string' ? pos : 'tr';
+%>
+<img class="flower flower--<%= spot %>" src="/assets/art/flower-accent.png"
+     alt="" width="150" height="325" aria-hidden="true" loading="lazy" decoding="async">

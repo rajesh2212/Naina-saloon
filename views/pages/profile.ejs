@@ -12,7 +12,8 @@
   var photo = user.photo_path || null;
 %>
 
-<section class="section" aria-labelledby="page-title">
+<section class="section section--flower" aria-labelledby="page-title">
+  <%- include('../partials/flower', { pos: 'tr' }) %>
   <div class="wrap wrap--narrow">
     <p class="eyebrow">Account</p>
     <h1 id="page-title">My details</h1>
