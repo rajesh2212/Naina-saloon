@@ -80,10 +80,52 @@ function countAdmins() {
   return Number(db.get("SELECT COUNT(*) AS n FROM users WHERE role = 'admin' AND is_active = 1").n || 0);
 }
 
+/**
+ * Staff accounts, newest activity first. The password column is not in the
+ * select list, so nothing on this screen can carry a hash to the browser.
+ */
+function listStaff() {
+  return db.all(`SELECT ${PUBLIC_COLUMNS} FROM users WHERE role = 'admin' ORDER BY is_active DESC, last_login_at IS NULL, last_login_at DESC, id`);
+}
+
+/**
+ * Move an account between `customer` and `admin`. Losing the role also drops
+ * that account's sessions, so a demoted staff member cannot keep a portal page
+ * open on the session that was minted while they had the role.
+ */
+function setRole(id, role) {
+  if (role !== 'admin' && role !== 'customer') throw new Error('The only roles are customer and admin.');
+  db.run("UPDATE users SET role = ?, updated_at = datetime('now') WHERE id = ?", role, id);
+  if (role !== 'admin') db.run("DELETE FROM sessions WHERE json_extract(sess, '$.userId') = ?", id);
+  return findById(id);
+}
+
+/** Stop an account signing in — bookings and history stay intact. */
+function setActive(id, active) {
+  db.run("UPDATE users SET is_active = ?, updated_at = datetime('now') WHERE id = ?", active ? 1 : 0, id);
+  if (!active) {
+    db.run('DELETE FROM password_resets WHERE user_id = ? AND used_at IS NULL', id);
+    db.run("DELETE FROM sessions WHERE json_extract(sess, '$.userId') = ?", id);
+  }
+  return findById(id);
+}
+
+/** Make (or promote) a staff login from the portal, with a password that is only ever hashed. */
+async function createStaff({ email, name, password }) {
+  const user = await create({ email, name, password });
+  return setRole(user.id, 'admin');
+}
+
 async function promote(email, name = 'Salon team', password = null) {
   const existing = findByEmail(email);
   if (existing) {
-    db.run("UPDATE users SET role = 'admin', name = COALESCE(NULLIF(name, ''), name) WHERE id = ?", name, existing.id);
+    // Keep the account's own name; the label is only a fallback for a row that
+    // was created without one. The password is deliberately left untouched.
+    db.run(
+      "UPDATE users SET role = 'admin', name = COALESCE(NULLIF(name, ''), ?), updated_at = datetime('now') WHERE id = ?",
+      normalizeText(name, 80) || 'Salon team',
+      existing.id,
+    );
     return { user: findById(existing.id), created: false };
   }
   if (!password) {
@@ -107,5 +149,9 @@ module.exports = {
   recordLogin,
   count,
   countAdmins,
+  listStaff,
+  setRole,
+  setActive,
+  createStaff,
   promote,
 };
