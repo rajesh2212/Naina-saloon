@@ -1,0 +1,19 @@
+<%
+/* The three account screens are one flow, so each of them carries the same
+   three-way switch. `?next=` rides along on every link, so a customer who came
+   from the booking page and hops over to register still ends up back there. */
+var which = locals.active || 'login';
+var carry = typeof locals.next === 'string' && locals.next.startsWith('/') && !locals.next.startsWith('//')
+  ? '?next=' + encodeURIComponent(locals.next)
+  : '';
+var tabs = [
+  { key: 'login', href: '/auth/login', label: 'Sign in' },
+  { key: 'register', href: '/auth/register', label: 'Create an account' },
+  { key: 'forgot', href: '/auth/forgot-password', label: 'Forgot password' },
+];
+%>
+<nav class="tabs" aria-label="Account">
+  <% tabs.forEach(function (tab) { %>
+    <a href="<%= tab.href %><%= carry %>"<% if (which === tab.key) { %> aria-current="true"<% } %>><%= tab.label %></a>
+  <% }); %>
+</nav>

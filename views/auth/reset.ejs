@@ -15,23 +15,22 @@
       <form method="post" action="/auth/reset/<%= token %>" class="mt-2" data-once>
         <%- csrfField() %>
 
-        <div class="field">
-          <label for="password">New password</label>
-          <input class="input" id="password" name="password" type="password"
-                 autocomplete="new-password" required minlength="10"
-                 aria-describedby="password-hint<%= errors.password ? ' password-error' : '' %>"
-                 <% if (errors.password) { %>aria-invalid="true"<% } %>>
-          <% if (errors.password) { %><p class="error" id="password-error"><%= errors.password %></p><% } %>
-          <p class="hint" id="password-hint">At least 10 characters, with at least one letter and one number.</p>
-        </div>
+        <%- include('../partials/password-field', {
+          id: 'password',
+          label: 'New password',
+          autocomplete: 'new-password',
+          minLength: 10,
+          error: errors.password || null,
+          hint: 'At least 10 characters, with at least one letter and one number.'
+        }) %>
 
-        <div class="field">
-          <label for="confirm_password">Type the new password again</label>
-          <input class="input" id="confirm_password" name="confirm_password" type="password"
-                 autocomplete="new-password" required
-                 <% if (errors.confirm) { %>aria-invalid="true" aria-describedby="confirm-error"<% } %>>
-          <% if (errors.confirm) { %><p class="error" id="confirm-error"><%= errors.confirm %></p><% } %>
-        </div>
+        <%- include('../partials/password-field', {
+          id: 'confirm_password',
+          label: 'Type the new password again',
+          name: 'confirm_password',
+          autocomplete: 'new-password',
+          error: errors.confirm || null
+        }) %>
 
         <%- include('../partials/captcha') %>
 

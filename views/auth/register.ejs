@@ -2,12 +2,15 @@
 
 <section class="section" aria-labelledby="page-title">
   <div class="wrap wrap--narrow">
+    <%- include('../partials/auth-tabs', { active: 'register', next: locals.next || '' }) %>
+
     <div class="card card--accent">
       <p class="eyebrow">New account</p>
       <h1 id="page-title">Create your account</h1>
       <p class="muted">
         Three things are needed: your name, an email for password recovery, and a password. We do not
         ask your gender — use the title box only if you want the studio to call you something specific.
+        Age, address and Block are asked next, on your profile, and only then can a chair time be held.
       </p>
 
       <% if (errors.form) { %><p class="alert alert--error" role="alert"><%= errors.form %></p><% } %>
@@ -50,23 +53,21 @@
           <% if (errors.phone) { %><p class="error" id="phone-error"><%= errors.phone %></p><% } %>
         </div>
 
-        <div class="field">
-          <label for="password">Password</label>
-          <input class="input" id="password" name="password" type="password"
-                 autocomplete="new-password" required minlength="10"
-                 aria-describedby="password-hint<%= errors.password ? ' password-error' : '' %>"
-                 <% if (errors.password) { %>aria-invalid="true"<% } %>>
-          <% if (errors.password) { %><p class="error" id="password-error"><%= errors.password %></p><% } %>
-          <p class="hint" id="password-hint">At least 10 characters, with a letter and a number. Stored only as a salted hash.</p>
-        </div>
+        <%- include('../partials/password-field', {
+          id: 'password',
+          label: 'Password',
+          autocomplete: 'new-password',
+          minLength: 10,
+          error: errors.password || null,
+          hint: 'At least 10 characters, with a letter and a number. Stored only as a salted hash.'
+        }) %>
 
-        <div class="field">
-          <label for="confirm_password">Type the password again</label>
-          <input class="input" id="confirm_password" name="confirm_password" type="password"
-                 autocomplete="new-password" required
-                 <% if (errors.confirm) { %>aria-invalid="true" aria-describedby="confirm-error"<% } %>>
-          <% if (errors.confirm) { %><p class="error" id="confirm-error"><%= errors.confirm %></p><% } %>
-        </div>
+        <%- include('../partials/password-field', {
+          id: 'confirm_password',
+          label: 'Type the password again',
+          autocomplete: 'new-password',
+          error: errors.confirm || null
+        }) %>
 
         <div class="field">
           <div class="checkline">
@@ -82,7 +83,7 @@
 
         <div class="form-actions">
           <button class="btn" type="submit">Create account</button>
-          <a class="btn btn--ghost" href="/auth/login">I already have an account</a>
+          <a class="btn btn--ghost" href="/auth/login<%= locals.next ? '?next=' + encodeURIComponent(locals.next) : '' %>">I already have an account</a>
         </div>
         <p class="form-note">
           Your details are used for bookings at this studio only. Passwords are hashed with bcrypt and

@@ -4,6 +4,7 @@ const express = require('express');
 const db = require('../db');
 const users = require('../lib/users');
 const captcha = require('../lib/captcha');
+const profile = require('../lib/profile');
 const { wrap } = require('../lib/async');
 const { flash } = require('../lib/flash');
 const v = require('../lib/validate');
@@ -21,23 +22,41 @@ const TOKEN_RE = /^[A-Za-z0-9_-]{16,128}$/;
 const nowSql = () => new Date().toISOString().replace('T', ' ').slice(0, 19);
 const emailFromRequest = (req) => v.normalizeEmail(req.body && req.body.email);
 
+/** Only an internal path counts as "where the customer was going". */
+function isInternalPath(target) {
+  return typeof target === 'string' && target.startsWith('/') && !target.startsWith('//');
+}
+
 function safeReturnTo(req, fallback = '/account') {
   const target = req.session && req.session.returnTo;
   if (req.session) delete req.session.returnTo;
-  return typeof target === 'string' && target.startsWith('/') && !target.startsWith('//') ? target : fallback;
+  return isInternalPath(target) ? target : fallback;
+}
+
+/**
+ * `?next=` on the URL, or the intent already remembered in the session — so the
+ * three-way account switch keeps passing it on across a failed POST too.
+ */
+function nextFromQuery(req) {
+  const fromQuery = req.query && req.query.next;
+  if (isInternalPath(fromQuery)) return fromQuery;
+  const remembered = req.session && req.session.returnTo;
+  return isInternalPath(remembered) ? remembered : '';
 }
 
 /**
  * Log the account in a brand-new session id (fixation guard) and carry the
- * flash message across the regenerate callback.
+ * flash message across the regenerate callback. `keepReturnTo` re-stores the
+ * page the customer first asked for, because regenerating drops the old session.
  */
-function signInFreshSession(req, res, next, { userId, role, message, redirectTo }) {
+function signInFreshSession(req, res, next, { userId, role, message, redirectTo, keepReturnTo }) {
   const pending = (req.session && req.session._flash) || [];
   req.session.regenerate((err) => {
     if (err) return next(err);
     req.session.userId = userId;
     req.session.role = role;
     req.session._flash = pending;
+    if (isInternalPath(keepReturnTo)) req.session.returnTo = keepReturnTo;
     tokenFor(req, true);
     if (message) flash.success(req, message);
     return res.redirect(redirectTo);
@@ -48,12 +67,13 @@ function signInFreshSession(req, res, next, { userId, role, message, redirectTo 
 // Create an account
 // ---------------------------------------------------------------------------
 router.get('/register', (req, res) => {
-  const next = typeof req.query.next === 'string' ? req.query.next : '';
-  if (next.startsWith('/') && !next.startsWith('//')) req.session.returnTo = next;
+  const intended = nextFromQuery(req);
+  if (intended) req.session.returnTo = intended;
   res.render('auth/register', {
     title: 'Create your account',
     values: { name: '', email: '', phone: '', preferredTitle: '' },
     errors: {},
+    next: intended,
     captchaNext: Date.now(),
   });
 });
@@ -74,6 +94,7 @@ router.post(
         title: 'Create your account',
         values,
         errors,
+        next: nextFromQuery(req),
         captchaNext: Date.now(),
       });
 
@@ -127,11 +148,20 @@ router.post(
     if (!user) return fail({ form: 'We could not create that account. Please try again.' }, 500);
 
     throttle.clear(`register:${req.ip}`);
+    const intended = safeReturnTo(req, '/book');
+    const completion = profile.completeness(user);
+    // A new account has a name and maybe a number, and nothing else. Sending it
+    // straight at /book would only bounce it back here from the booking gate, so
+    // go to the profile first and keep the booking page in the new session.
+    const left = completion.steps.filter((step) => !step.done).length;
     return signInFreshSession(req, res, next, {
       userId: user.id,
       role: user.role,
-      message: 'Your account is ready — you can book an appointment now.',
-      redirectTo: safeReturnTo(req, '/book'),
+      message: completion.complete
+        ? 'Your account is ready — you can book an appointment now.'
+        : `Your account is ready. ${left} more ${left === 1 ? 'detail' : 'details'} on the next page and the studio can hold a time for you.`,
+      redirectTo: completion.complete ? intended : '/account/profile',
+      keepReturnTo: completion.complete ? null : intended,
     });
   }),
 );
@@ -140,8 +170,8 @@ router.post(
 // Sign in / out
 // ---------------------------------------------------------------------------
 router.get('/login', (req, res) => {
-  const next = typeof req.query.next === 'string' ? req.query.next : '';
-  if (next.startsWith('/') && !next.startsWith('//')) req.session.returnTo = next;
+  const intended = nextFromQuery(req);
+  if (intended) req.session.returnTo = intended;
   if (req.query.email && typeof req.query.email === 'string' && req.query.email.length < 200) {
     req.session.loginPrefill = req.query.email;
   }
@@ -149,6 +179,7 @@ router.get('/login', (req, res) => {
     title: 'Sign in',
     values: { email: req.session.loginPrefill || '' },
     errors: {},
+    next: intended,
     captchaNext: Date.now(),
   });
 });
@@ -164,6 +195,7 @@ router.post(
         title: 'Sign in',
         values: { email },
         errors,
+        next: nextFromQuery(req),
         captchaNext: Date.now(),
       });
 
@@ -187,11 +219,18 @@ router.post(
     throttle.clear(`login-email:${email}`);
     users.recordLogin(outcome.user.id);
     const firstName = v.normalizeText(outcome.user.name, 40).split(' ')[0];
+    const intended = safeReturnTo(req, outcome.user.role === 'admin' ? '/portal' : '/account');
+    // Heading for a booking with an incomplete profile: the gate would send them
+    // to the profile anyway, so take them there directly and keep the booking
+    // page in the new session for when the details are in.
+    const wantsToBook = /^\/book(\/|$)/.test(intended);
+    const incomplete = outcome.user.role !== 'admin' && !profile.isProfileComplete(outcome.user);
     return signInFreshSession(req, res, next, {
       userId: outcome.user.id,
       role: outcome.user.role,
       message: `Welcome back, ${firstName}.`,
-      redirectTo: safeReturnTo(req, outcome.user.role === 'admin' ? '/portal' : '/account'),
+      redirectTo: wantsToBook && incomplete ? '/account/profile' : intended,
+      keepReturnTo: wantsToBook && incomplete ? intended : null,
     });
   }),
 );
@@ -209,6 +248,7 @@ router.post('/logout', (req, res) => {
 router.get('/forgot-password', (req, res) => {
   res.render('auth/forgot', {
     title: 'Forgot your password',
+    next: nextFromQuery(req),
     mail: mailStatus(),
     notice: null,
     values: { email: '' },
@@ -229,6 +269,7 @@ router.post(
       if (!check.ok) captcha.issue(req);
       return res.status(400).render('auth/forgot', {
         title: 'Forgot your password',
+        next: nextFromQuery(req),
         mail: mailStatus(),
         notice: null,
         values: { email },
@@ -276,6 +317,7 @@ router.post(
       db.run('DELETE FROM password_resets WHERE id = ?', inserted.lastInsertRowid);
       return res.status(502).render('auth/forgot', {
         title: 'Forgot your password',
+        next: nextFromQuery(req),
         mail: status,
         notice: 'The mail server rejected the message. Please try again in a few minutes, or call the studio and we will sort it out at the counter.',
         values: { email },
@@ -288,6 +330,7 @@ router.post(
       // No credentials configured: say so plainly rather than pretending.
       return res.render('auth/forgot', {
         title: 'Forgot your password',
+        next: nextFromQuery(req),
         mail: { ...status, attempted: true, unconfigured: true },
         notice: null,
         values: { email },

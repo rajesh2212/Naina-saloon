@@ -2,6 +2,8 @@
 
 <section class="section" aria-labelledby="page-title">
   <div class="wrap wrap--narrow">
+    <%- include('../partials/auth-tabs', { active: 'forgot', next: locals.next || '' }) %>
+
     <div class="card card--accent">
       <p class="eyebrow">Account recovery</p>
       <h1 id="page-title">Forgot your password?</h1>
@@ -45,7 +47,7 @@
 
           <div class="form-actions">
             <button class="btn" type="submit">Send me a reset link</button>
-            <a class="btn btn--ghost" href="/auth/login">Back to sign in</a>
+            <a class="btn btn--ghost" href="/auth/login<%= locals.next ? '?next=' + encodeURIComponent(locals.next) : '' %>">Back to sign in</a>
           </div>
           <p class="form-note">
             If the address is not on our books, this page still says the same thing, so nobody can use
@@ -54,7 +56,7 @@
         </form>
       <% } else { %>
         <p class="form-actions">
-          <a class="btn btn--ghost" href="/auth/login">Back to sign in</a>
+          <a class="btn btn--ghost" href="/auth/login<%= locals.next ? '?next=' + encodeURIComponent(locals.next) : '' %>">Back to sign in</a>
         </p>
       <% } %>
     </div>
