@@ -6,6 +6,8 @@ const users = require('../lib/users');
 const slots = require('../lib/slots');
 const captcha = require('../lib/captcha');
 const v = require('../lib/validate');
+const profile = require('../lib/profile');
+const uploads = require('../lib/uploads');
 const { wrap } = require('../lib/async');
 const { flash } = require('../lib/flash');
 const { tokenFor } = require('../lib/csrf');
@@ -36,19 +38,52 @@ router.get('/', (req, res) => {
   });
 });
 
-router.get('/profile', (req, res) => {
-  const user = res.locals.currentUser;
-  res.render('pages/profile', {
+// ---------------------------------------------------------------------------
+// Profile: the five details, the completion bar, and the avatar
+// ---------------------------------------------------------------------------
+
+/** What the form shows back: the posted values when there are any, the stored ones otherwise. */
+function profileValues(user) {
+  return {
+    name: user.name || '',
+    phone: user.phone || '',
+    preferredTitle: user.preferred_title || '',
+    notes: user.notes || '',
+    age: user.age === null || user.age === undefined ? '' : String(user.age),
+    address: user.address || '',
+    block: user.block || '',
+  };
+}
+
+// completeness() only asks whether a photo exists, so this stands in for a
+// posted picture that has cleared validation but is not on disk yet.
+const PENDING_PHOTO = 'awaiting-disk-write';
+
+/**
+ * The three render sites for this page share one locals object so the bar, the
+ * Block dropdown and the photo never go missing from a re-rendered form.
+ */
+function profileLocals(user, values, errors, completion = profile.completeness(user)) {
+  return {
     title: 'My details',
     user,
-    values: {
-      name: user.name,
-      phone: user.phone || '',
-      preferredTitle: user.preferred_title || '',
-      notes: user.notes || '',
-    },
-    errors: {},
-  });
+    values,
+    errors,
+    blocks: profile.BLOCKS,
+    completion,
+    addressMax: profile.ADDRESS_MAX,
+  };
+}
+
+/**
+ * The profile page posts one form with all five details. Validation is only
+ * about shape — an age that is not a number, a Block that is not on the list —
+ * so a customer can save a half-finished profile and come back. Whether the
+ * profile is *complete* is what src/lib/profile.js decides, and what the
+ * booking gate in src/lib/guards.js enforces.
+ */
+router.get('/profile', (req, res) => {
+  res.render('pages/profile', profileLocals(res.locals.currentUser, profileValues(res.locals.currentUser), {}));
 });
 
 router.post('/profile', (req, res) => {
@@ -58,23 +93,88 @@ router.post('/profile', (req, res) => {
     phone: req.body.phone,
     preferredTitle: req.body.preferred_title,
     notes: req.body.notes,
+    age: req.body.age,
+    address: req.body.address,
+    block: req.body.block,
   };
+  const removePhoto = Boolean(req.body.remove_photo);
+  const photoData = String(req.body.photo_data || '');
+
+  // A posted picture only counts toward completion once its bytes check out,
+  // so decode before anything reaches the disk.
+  const pending = photoData && !removePhoto ? uploads.decodeImage(photoData) : null;
+  const draft = {
+    ...user,
+    name: values.name,
+    phone: values.phone,
+    age: values.age,
+    address: values.address,
+    block: values.block,
+    photo_path: removePhoto
+      ? null
+      : pending && pending.ok
+        ? PENDING_PHOTO
+        : user.photo_path,
+  };
+
   const errors = {
     name: v.nameError(values.name),
     phone: v.phoneError(values.phone),
     preferredTitle: v.lengthError(v.normalizeText(values.preferredTitle, 24), 24, 'That title'),
     notes: v.lengthError(v.normalizeMultiline(values.notes, 500), 500, 'Your note'),
+    age: profile.ageError(values.age),
+    address: profile.addressError(values.address),
+    block: profile.blockError(values.block),
+    photo: pending && !pending.ok ? pending.error : null,
   };
   const clean = Object.fromEntries(Object.entries(errors).filter(([, message]) => message));
+  const shown = { ...profileValues(user), ...values, preferredTitle: values.preferredTitle, removePhoto };
 
   if (Object.keys(clean).length) {
-    return res.status(400).render('pages/profile', { title: 'My details', user, values, errors: clean });
+    return res.status(400).render('pages/profile', profileLocals(user, shown, clean, profile.completeness(draft)));
   }
 
-  users.updateProfile(user.id, values);
-  flash.success(req, 'Your details were saved.');
-  return res.redirect('/account');
+  users.updateProfile(user.id, {
+    ...values,
+    block: profile.isBlock(values.block) ? v.normalizeText(values.block, 40) : '',
+  });
+
+  if (removePhoto) {
+    uploads.removeAvatar(user.photo_path);
+    users.setPhoto(user.id, null);
+  } else if (pending) {
+    const saved = uploads.saveAvatar(user.id, photoData, user.photo_path);
+    if (!saved.ok) {
+      flash.error(req, saved.error);
+      return res.redirect('/account/profile');
+    }
+    users.setPhoto(user.id, saved.path);
+  }
+
+  const after = users.findById(user.id);
+  const completion = profile.completeness(after);
+  flash.success(
+    req,
+    completion.complete
+      ? 'Your details are saved — and everything the studio needs is there, so you can book a chair time.'
+      : `Saved. Your profile is ${completion.percent}% complete — still to add: ${completion.missing.join(', ')}.`,
+  );
+  return res.redirect(afterProfileRedirect(req, completion));
 });
+
+/**
+ * Save progress, then carry on. While details are missing the profile stays
+ * open; once it is complete the customer goes back to whatever they first asked
+ * for — but only the booking flow or their bookings list, never an arbitrary
+ * absolute address or a staff URL.
+ */
+function afterProfileRedirect(req, completion) {
+  const remembered = String((req.session && req.session.returnTo) || '');
+  if (req.session) delete req.session.returnTo;
+  if (!completion.complete) return '/account/profile';
+  if (/^\/book(\/|$)/.test(remembered) || remembered === '/account') return remembered;
+  return '/account';
+}
 
 router.post(
   '/password',
@@ -98,19 +198,12 @@ router.post(
 
     if (Object.values(errors).some(Boolean)) {
       if (!check.ok) captcha.issue(req);
-      return res.status(400).render('pages/profile', {
-        title: 'My details',
-        user,
-        values: {
-          name: user.name,
-          phone: user.phone || '',
-          preferredTitle: user.preferred_title || '',
-          notes: user.notes || '',
-        },
-        errors,
-        passwordAttempt: true,
-        captchaNext: Date.now(),
-      });
+      return res
+        .status(400)
+        .render(
+          'pages/profile',
+          { ...profileLocals(user, profileValues(user), errors), passwordAttempt: true, captchaNext: Date.now() },
+        );
     }
 
     await users.changePassword(user.id, req.body.password);
