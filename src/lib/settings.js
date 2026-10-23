@@ -19,6 +19,95 @@ const HARD_LIMITS = {
   max_active_bookings_per_user: [1, 20],
 };
 
+/**
+ * The business details that ship as SALON_* environment variables, mapped to the
+ * `settings` key that overrides each one. A staff member edits these at
+ * /portal/details; the precedence is the same one the studio clock already uses,
+ * where a saved row beats the environment.
+ *
+ * `base` is the environment's answer, captured before anything is overwritten,
+ * so the portal can still say which value came from `.env` and which one it is
+ * holding itself.
+ */
+const DETAIL_FIELDS = [
+  { key: 'salon_name', field: 'name', label: 'Salon name', max: 80, required: true },
+  { key: 'salon_tagline', field: 'tagline', label: 'Tagline under the name', max: 60 },
+  { key: 'salon_phone', field: 'phone', label: 'Phone number', max: 30, phone: true },
+  { key: 'salon_address', field: 'address', label: 'Address', max: 240 },
+  { key: 'salon_since', field: 'since', label: 'Serving since (year)', max: 4, year: true },
+  { key: 'salon_maps_url', field: 'mapsUrl', label: 'Google Maps link', max: 500, url: true },
+  { key: 'salon_notify_email', field: 'notifyEmail', label: 'Copy each booking to', max: 160, email: true },
+];
+
+const base = { ...config.salon };
+
+/** The environment/default answer for one detail, never the stored override. */
+function baseDetail(field) {
+  return base[field];
+}
+
+/**
+ * `tel:` links are built from the phone the studio actually answers. A 10-digit
+ * Indian number gets the +91 it is missing; anything already international is
+ * kept as written.
+ */
+function phoneHref(phone) {
+  const raw = String(phone || '').trim();
+  if (raw.startsWith('+')) return raw.replace(/[^\d+]/g, '');
+  const digits = raw.replace(/\D/g, '');
+  if (digits.length === 10) return `+91${digits}`;
+  if (digits.length === 11 && digits.startsWith('0')) return `+91${digits.slice(1)}`;
+  if (digits.length === 12 && digits.startsWith('91')) return `+${digits}`;
+  return digits ? `+${digits}` : raw;
+}
+
+function textSetting(key, fallback) {
+  const row = db.get('SELECT value FROM settings WHERE key = ?', key);
+  if (!row || row.value === null) return fallback;
+  const value = String(row.value).trim();
+  return value === '' ? fallback : value;
+}
+
+/** Every detail the site shows right now: stored override, else `.env`, else shipped default. */
+function salonDetails() {
+  const merged = { ...base };
+  for (const field of DETAIL_FIELDS) merged[field.field] = textSetting(field.key, base[field.field]);
+  merged.phoneHref = phoneHref(merged.phone);
+  return merged;
+}
+
+/**
+ * Push the stored details into `config.salon` so every reader — the mail
+ * templates, the booking page, the header — picks them up without a restart.
+ * Call once at boot, and again after a save.
+ */
+function applySalonDetails() {
+  Object.assign(config.salon, salonDetails());
+  return config.salon;
+}
+
+/** Keys with a real stored override, so the portal can mark what `.env` no longer decides. */
+function savedDetailKeys() {
+  const wanted = DETAIL_FIELDS.map((field) => field.key);
+  const rows = db.all(
+    `SELECT key FROM settings WHERE TRIM(value) <> '' AND key IN (${wanted.map(() => '?').join(', ')})`,
+    ...wanted,
+  );
+  return new Set(rows.map((row) => row.key));
+}
+
+/** Which details a save wrote; an empty submission clears the override back to `.env`. */
+function saveSalonDetails(values) {
+  const written = [];
+  for (const field of DETAIL_FIELDS) {
+    if (!(field.key in values)) continue;
+    setSetting(field.key, String(values[field.key] || '').trim());
+    written.push(field.label);
+  }
+  applySalonDetails();
+  return written;
+}
+
 function getSetting(key, fallback = DEFAULTS[key]) {
   const row = db.get('SELECT value FROM settings WHERE key = ?', key);
   if (!row) return fallback;
@@ -164,8 +253,15 @@ function timeZonePresets() {
 module.exports = {
   DEFAULTS,
   HARD_LIMITS,
+  DETAIL_FIELDS,
   getSetting,
   setSetting,
+  baseDetail,
+  phoneHref,
+  salonDetails,
+  applySalonDetails,
+  savedDetailKeys,
+  saveSalonDetails,
   bookingRules,
   allWeekHours,
   dayHours,
