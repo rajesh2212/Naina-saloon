@@ -24,6 +24,8 @@ const slots = require('../lib/slots');
 const records = require('../lib/records');
 const users = require('../lib/users');
 const v = require('../lib/validate');
+const ticket = require('../lib/ticket');
+const { wrap } = require('../lib/async');
 const { flash } = require('../lib/flash');
 const { requireAdmin } = require('../lib/guards');
 
@@ -129,7 +131,7 @@ router.get('/bookings/:id(\\d+)', (req, res) => {
   });
 });
 
-router.post('/bookings/:id(\\d+)/status', (req, res) => {
+router.post('/bookings/:id(\\d+)/status', wrap(async (req, res) => {
   const back = safeBack(req.body.back, '/portal/bookings');
   const status = String(req.body.status || '');
   if (!records.STATUSES.includes(status)) {
@@ -147,12 +149,26 @@ router.post('/bookings/:id(\\d+)/status', (req, res) => {
       `Request #${booking.id} — ${booking.contact_name}, ${booking.service_name}, ` +
         `${dates.formatLongDate(booking.slot_date)} ${dates.formatTime12(booking.start_time)} — ${STATUS_LABELS[status]}.`,
     );
+    // Only after the status has committed: a ticket that fails to write must
+    // never undo the confirmation the studio just made.
+    if (status === 'confirmed') {
+      try {
+        await ticket.issue(booking.id);
+        flash.success(req, `Ticket #${booking.id} is ready for the customer to download.`);
+      } catch (error) {
+        flash.error(
+          req,
+          `Request #${booking.id} is confirmed, but its ticket could not be written (${error.message}). `
+            + "The customer's download link will try again.",
+        );
+      }
+    }
   } catch (error) {
     const expected = error.status && error.status < 500;
     flash.error(req, expected ? error.message : 'Could not update that request. Nothing was changed — try again.');
   }
   return res.redirect(back);
-});
+}));
 
 // ---------------------------------------------------------------- customers
 router.get('/customers', (req, res) => {

@@ -1,6 +1,7 @@
 <%- include('../partials/head') %>
 
-<section class="section" aria-labelledby="page-title">
+<section class="section section--flower" aria-labelledby="page-title">
+  <%- include('../partials/flower', { pos: 'tr' }) %>
   <div class="wrap">
     <p class="eyebrow">Your account</p>
     <h1 id="page-title"><%= currentUser.name %></h1>
@@ -45,10 +46,18 @@
                   appointment is within the next day or two.
                 </p>
               <% } else { %>
-                <p class="alert alert--success mt-1">Confirmed — please arrive a few minutes before your slot.</p>
+                <p class="alert alert--success mt-1">
+                  Confirmed — please arrive a few minutes before your slot.
+                  <% if (booking.hasTicket) { %>Your ticket is ready below.<% } %>
+                </p>
               <% } %>
 
               <div class="form-actions">
+                <% if (booking.hasTicket) { %>
+                  <a class="btn btn--sm btn--primary" href="/account/ticket/<%= booking.id %>">
+                    Download ticket (PDF)
+                  </a>
+                <% } %>
                 <form method="post" action="/account/bookings/<%= booking.id %>/cancel" data-once>
                   <%- csrfField() %>
                   <button class="btn btn--danger btn--sm" type="submit">Cancel this booking</button>
@@ -66,7 +75,10 @@
             <table>
               <caption class="sr-only">Bookings that are finished, declined or cancelled</caption>
               <thead>
-                <tr><th scope="col">Ref</th><th scope="col">Service</th><th scope="col">Day</th><th scope="col">Time</th><th scope="col">Status</th></tr>
+                <tr>
+                  <th scope="col">Ref</th><th scope="col">Service</th><th scope="col">Day</th>
+                  <th scope="col">Time</th><th scope="col">Status</th><th scope="col">Ticket</th>
+                </tr>
               </thead>
               <tbody>
                 <% history.forEach(function (booking) { %>
@@ -76,6 +88,13 @@
                     <td class="nowrap"><%= booking.dayLabel %></td>
                     <td class="nowrap"><%= booking.timeLabel %></td>
                     <td><span class="pill pill--<%= booking.status %>"><%= booking.status %></span></td>
+                    <td>
+                      <% if (booking.hasTicket) { %>
+                        <a class="small" href="/account/ticket/<%= booking.id %>">Download PDF</a>
+                      <% } else { %>
+                        <span class="muted small">—</span>
+                      <% } %>
+                    </td>
                   </tr>
                 <% }) %>
               </tbody>

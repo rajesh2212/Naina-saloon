@@ -7,6 +7,7 @@ const slots = require('../lib/slots');
 const captcha = require('../lib/captcha');
 const v = require('../lib/validate');
 const profile = require('../lib/profile');
+const ticket = require('../lib/ticket');
 const uploads = require('../lib/uploads');
 const { wrap } = require('../lib/async');
 const { flash } = require('../lib/flash');
@@ -24,6 +25,7 @@ function decorate(bookings) {
     timeLabel: dates.formatRange(row.start_time, row.duration_minutes),
     isPast: row.slot_date < dates.salonClock().date,
     isOpen: row.status === 'pending' || row.status === 'confirmed',
+    hasTicket: ticket.TICKET_STATUSES.includes(row.status),
   }));
 }
 
@@ -221,6 +223,31 @@ router.post(
     });
   }),
 );
+
+/**
+ * The ticket PDF for one of this account's own bookings.
+ *
+ * Two doors, both answering 404 rather than explaining themselves: a booking
+ * that belongs to somebody else, and a request the studio has not accepted. A
+ * pending request has no ticket to show, so there is no page that could offer
+ * one. The file itself is made on demand by src/lib/ticket.js and kept in
+ * public/uploads/tickets, so the same link works on every visit afterwards.
+ */
+router.get(
+  '/ticket/:id(\\d+)',
+  wrap(async (req, res) => {
+    const owned = slots.bookingById(Number(req.params.id));
+    if (!owned || owned.user_id !== res.locals.currentUser.id) return renderNoTicket(res);
+    const result = await ticket.ensure(owned.id);
+    if (!result.ok) return renderNoTicket(res);
+    res.download(result.file, `naina-beauty-parlour-ticket-${owned.id}.pdf`);
+  }),
+);
+
+function renderNoTicket(res) {
+  res.status(404);
+  return res.render('errors/404', { title: 'No ticket for that booking' });
+}
 
 router.post('/bookings/:id/cancel', (req, res) => {
   const id = Number(req.params.id);
