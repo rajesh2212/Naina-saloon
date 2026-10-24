@@ -1171,21 +1171,25 @@ legend { font-weight: 650; font-size: .95rem; padding: 0; margin-bottom: .6rem; 
    `open`, so with JavaScript off it simply stays a card in the flow and the form
    below it posts unchanged — the sheet is presentation, never the only way in. */
 .steppanel {
+  --panel-pad: clamp(1rem, 3vw, 1.75rem);
   width: min(100% - 1.5rem, 1040px);
   margin-block: clamp(1.5rem, 5vw, 3.5rem);
   margin-inline: auto;
-  padding: clamp(1rem, 3vw, 1.75rem);
-  border: 1px solid var(--line);
+  padding: var(--panel-pad);
+  border: 1px solid var(--line-strong);
   border-radius: 30px;
   background: var(--bg);
   color: var(--ink);
 }
+/* The outline stays in the modal state: without it the sheet read as a hole in
+   the page rather than an object with soft corners, and the deep radius had
+   nothing to sit against. */
 .steppanel[data-modal] {
   max-height: min(88dvh, 940px);
   overflow-x: hidden;
   overflow-y: auto;
-  border: 0;
-  box-shadow: 0 28px 70px -24px rgba(36, 26, 21, .5);
+  border: 1px solid var(--line-strong);
+  box-shadow: 0 28px 70px -24px rgba(36, 26, 21, .5), 0 1px 0 rgba(255, 255, 255, .7) inset;
   overscroll-behavior: contain;
 }
 .steppanel::backdrop {
@@ -1193,14 +1197,18 @@ legend { font-weight: 650; font-size: .95rem; padding: 0; margin-bottom: .6rem; 
   backdrop-filter: blur(3px);
 }
 .steppanel__bar {
+  position: sticky;
+  top: calc(var(--panel-pad) * -1);
+  z-index: 2;
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
   gap: .75rem;
-  margin-bottom: 1rem;
-  padding-bottom: .85rem;
+  margin: calc(var(--panel-pad) * -1) calc(var(--panel-pad) * -1) 1rem;
+  padding: calc(var(--panel-pad) * .55) var(--panel-pad) .85rem;
   border-bottom: 1px solid var(--line);
+  background: var(--bg);
 }
 .steppanel__back {
   display: inline-flex;
@@ -1222,15 +1230,137 @@ legend { font-weight: 650; font-size: .95rem; padding: 0; margin-bottom: .6rem; 
 .steppanel__where {
   display: grid;
   gap: .1rem;
+  flex: 1 1 auto;
   margin: 0;
   text-align: right;
   color: var(--muted);
 }
 .steppanel__where strong { color: var(--ink); font-size: 1rem; }
 @media (max-width: 560px) {
-  .steppanel { border-radius: 22px; }
+  .steppanel,
+  .poppanel { border-radius: 22px; }
   .steppanel__where { text-align: left; }
 }
+
+/* ---------- pop-ups: one close control, one sheet ---------------------------
+   Every pop-up on the site is a real <dialog>. main.js marks the ones it owns
+   `data-modal`, which is what switches a card in the page flow into a sheet over
+   a scrim — and what reveals the ×, because a panel that is not floating has
+   nothing to close. The button itself is a plain <button type="button"> beside
+   the sheet's own title, so it is reachable with the keyboard and named to a
+   screen reader without depending on the icon. */
+.popup__close {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  width: var(--tap);
+  height: var(--tap);
+  border: 1.5px solid var(--line-strong);
+  border-radius: 999px;
+  background: var(--panel);
+  color: var(--teal-deep);
+  cursor: pointer;
+}
+.popup__close:hover { border-color: var(--teal); background: var(--teal-soft); }
+.popup__close:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
+.popup__close .icon { width: 20px; height: 20px; }
+dialog:not([data-modal]) .popup__close { display: none; }
+
+/* The page behind an open sheet cannot scroll. main.js measures the scrollbar it
+   is about to lose and hands the width back as padding, so the header does not
+   slide sideways when the scrim appears — and both are undone on close. */
+html[data-popup-open] {
+  overflow: hidden;
+  padding-inline-end: var(--popup-gap, 0px);
+}
+
+/* The account sheet: the customer’s own details and bookings, over the page they
+   were standing on. Same corner radius, border and shadow as the booking sheet so
+   the two read as one family. */
+.poppanel {
+  --panel-pad: clamp(1rem, 3vw, 1.5rem);
+  width: min(100% - 1.5rem, 620px);
+  margin: auto;
+  padding: 0;
+  border: 1px solid var(--line-strong);
+  border-radius: 30px;
+  background: var(--bg);
+  color: var(--ink);
+}
+.poppanel[data-modal] {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  max-height: min(88dvh, 880px);
+  overflow: hidden;
+  box-shadow: 0 28px 70px -24px rgba(36, 26, 21, .5), 0 1px 0 rgba(255, 255, 255, .7) inset;
+}
+.poppanel::backdrop {
+  background: rgba(36, 26, 21, .58);
+  backdrop-filter: blur(3px);
+}
+.poppanel__bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: .75rem;
+  padding: calc(var(--panel-pad) * .7) var(--panel-pad) .7rem;
+  border-bottom: 1px solid var(--line);
+  background: var(--bg);
+}
+.poppanel__body {
+  padding: var(--panel-pad);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.poppanel__title { margin: 0; font-family: var(--serif); font-size: 1.15rem; color: var(--ink); }
+.poppanel__body .poppanel__title { margin: 1.35rem 0 .4rem; font-size: 1.05rem; }
+.poppanel__body > .poppanel__title:first-child { margin-top: 0; }
+.poppanel__id { display: flex; align-items: center; gap: 1rem; }
+.poppanel__state { margin: .35rem 0 0; font-size: .9rem; color: var(--ink-soft); }
+.poppanel__actions { display: flex; flex-wrap: wrap; gap: .6rem; margin-top: 1.1rem; }
+.poppanel__says { margin: .15rem 0 .8rem; font-size: .85rem; color: var(--muted); }
+.poppanel__list { display: grid; gap: .45rem; margin: 0; padding: 0; list-style: none; }
+.poppanel__list li {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: .1rem .6rem;
+  align-items: center;
+  padding: .7rem .85rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--panel);
+}
+.poppanel__li-service { font-weight: 650; }
+.poppanel__list li > .muted,
+.poppanel__list li > a { grid-column: 1 / -1; }
+.poppanel__wrap { text-align: right; overflow-wrap: anywhere; font-weight: 500; }
+.poppanel__row .card__title { font-size: 1.05rem; }
+.poppanel__foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: .6rem;
+  margin-top: 1.4rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--line);
+}
+.poppanel__signout { margin: 0 0 0 auto; }
+.poppanel .panel-form { margin-top: .35rem; }
+.poppanel .empty { margin-bottom: .2rem; }
+/* The pop-up is the narrower of the two sheets, so the booking card’s two-column
+   strip would only have wrapped anyway; one line per row keeps it readable down to
+   a small phone without a horizontal pan. */
+@media (max-width: 420px) {
+  .poppanel { width: calc(100% - 1rem); }
+  .poppanel__id { align-items: flex-start; }
+  .poppanel__foot { flex-direction: column; align-items: stretch; }
+  .poppanel__signout { margin-left: 0; }
+}
+
+/* The tick on the account sheet sits on the photo’s upper edge rather than the
+   lower one it uses on the details page, but it is the same mark and appears on
+   the same condition: profile.completeness() saying every detail is on file. */
+.profile-tick--upper { top: -3px; bottom: auto; }
 
 /* The reference the counter asks for, set apart so it can be read off a screen. */
 .done__ref {
@@ -1374,12 +1504,21 @@ td .btn { margin: .15rem .2rem .15rem 0; }
 .stat span { font-size: .85rem; color: var(--muted); }
 
 .tabs { display: flex; flex-wrap: wrap; gap: .4rem; margin-bottom: 1.25rem; }
-.tabs a {
+.tabs a,
+.tabs .tab {
   display: inline-flex; align-items: center; min-height: var(--tap); padding: .4rem .9rem;
   border: 1px solid var(--line-strong); border-radius: 999px; text-decoration: none;
   color: var(--ink-soft); font-weight: 600; font-size: .88rem; background: var(--panel);
 }
-.tabs a[aria-current="true"] { background: var(--teal-deep); border-color: var(--teal-deep); color: #fff; }
+/* The account sheet’s tabs are buttons, since they switch lists on the same page
+   instead of going anywhere; they take the pill look of the linked tabs. */
+.tabs .tab { font-family: inherit; cursor: pointer; }
+.tabs a[aria-current="true"],
+.tabs .tab[aria-selected="true"] { background: var(--teal-deep); border-color: var(--teal-deep); color: #fff; }
+.tabs .tab:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
+.tab__count { margin-left: .4rem; font-weight: 700; opacity: .8; }
+.tabs a[aria-current="true"] .tab__count,
+.tabs .tab[aria-selected="true"] .tab__count { opacity: 1; }
 
 .admin-list { display: grid; gap: .8rem; }
 .inline-form { display: inline; }

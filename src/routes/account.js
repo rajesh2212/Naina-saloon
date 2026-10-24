@@ -40,6 +40,69 @@ router.get('/', (req, res) => {
   });
 });
 
+/**
+ * The two lists the account pop-up shows, from the same rows the /account page
+ * already reads. Their difference is deliberate: *current* is everything the
+ * diary still carries for this customer — only a completed appointment leaves it —
+ * while *history* is the whole record, all five statuses. A pending, rejected or
+ * cancelled request therefore appears in both, which is why the panel labels the
+ * second one as the record rather than the past.
+ */
+function panelGroups(user) {
+  const bookings = decorate(slots.listUserBookings(user.id));
+  return {
+    current: bookings.filter((booking) => booking.status !== 'completed'),
+    history: bookings,
+  };
+}
+
+/**
+ * Locals for the pop-up fragment. One shape for all three modes (view, profile
+ * editor, photo editor) so a re-rendered form keeps its Block dropdown, its
+ * completion bar and its photo exactly as the full page does.
+ */
+function panelBody(user, over = {}) {
+  const groups = panelGroups(user);
+  return Object.assign(
+    {
+      panelMode: 'view',
+      user,
+      values: profileValues(user),
+      errors: {},
+      blocks: profile.BLOCKS,
+      completion: profile.completeness(user),
+      addressMax: profile.ADDRESS_MAX,
+      notice: null,
+      noticeKind: 'ok',
+    },
+    groups,
+    over,
+  );
+}
+
+/** Only the pop-up’s own fetch sets this header, so a plain form post still redirects. */
+function panelWanted(req) {
+  return req.get('x-naina-panel') === '1';
+}
+
+/**
+ * Answers for the pop-up. The header is how main.js tells a fragment from a page:
+ * a session that expired mid-edit comes back as the sign-in page instead, and the
+ * browser is sent there rather than having a whole layout pasted into the sheet.
+ */
+function sendPanel(res, status, locals) {
+  res.set('X-Naina-Panel', '1');
+  res.set('Cache-Control', 'no-store');
+  if (status) res.status(status);
+  return res.render('partials/account-panel', locals);
+}
+
+router.get('/panel', (req, res) => {
+  const edit = String(req.query.edit || '');
+  const panelMode = edit === 'photo' ? 'photo' : edit === 'profile' ? 'profile' : 'view';
+  sendPanel(res, null, panelBody(res.locals.currentUser, { panelMode }));
+});
+
 // ---------------------------------------------------------------------------
 // Profile: the five details, the completion bar, and the avatar
 // ---------------------------------------------------------------------------
@@ -131,9 +194,18 @@ router.post('/profile', (req, res) => {
   };
   const clean = Object.fromEntries(Object.entries(errors).filter(([, message]) => message));
   const shown = { ...profileValues(user), ...values, preferredTitle: values.preferredTitle, removePhoto };
+  const editorMode = req.body.panel_mode === 'photo' ? 'photo' : 'profile';
 
   if (Object.keys(clean).length) {
-    return res.status(400).render('pages/profile', profileLocals(user, shown, clean, profile.completeness(draft)));
+    const completionDraft = profile.completeness(draft);
+    if (panelWanted(req)) {
+      return sendPanel(
+        res,
+        400,
+        panelBody(res.locals.currentUser, { panelMode: editorMode, values: shown, errors: clean, completion: completionDraft }),
+      );
+    }
+    return res.status(400).render('pages/profile', profileLocals(user, shown, clean, completionDraft));
   }
 
   users.updateProfile(user.id, {
@@ -147,6 +219,13 @@ router.post('/profile', (req, res) => {
   } else if (pending) {
     const saved = uploads.saveAvatar(user.id, photoData, user.photo_path);
     if (!saved.ok) {
+      if (panelWanted(req)) {
+        return sendPanel(
+          res,
+          400,
+          panelBody(res.locals.currentUser, { panelMode: editorMode, notice: saved.error, noticeKind: 'error' }),
+        );
+      }
       flash.error(req, saved.error);
       return res.redirect('/account/profile');
     }
@@ -155,12 +234,21 @@ router.post('/profile', (req, res) => {
 
   const after = users.findById(user.id);
   const completion = profile.completeness(after);
-  flash.success(
-    req,
-    completion.complete
-      ? 'Your details are saved — and everything the studio needs is there, so you can book a chair time.'
-      : `Saved. Your profile is ${completion.percent}% complete — still to add: ${completion.missing.join(', ')}.`,
-  );
+  const message = completion.complete
+    ? 'Your details are saved — and everything the studio needs is there, so you can book a chair time.'
+    : `Saved. Your profile is ${completion.percent}% complete — still to add: ${completion.missing.join(', ')}.`;
+
+  // The pop-up stays on the page it was opened on and shows the saved values,
+  // so the re-render reads the account back out of the database.
+  if (panelWanted(req)) {
+    return sendPanel(
+      res,
+      null,
+      panelBody(res.locals.currentUser, { user: after, values: profileValues(after), completion, notice: message }),
+    );
+  }
+
+  flash.success(req, message);
   return res.redirect(afterProfileRedirect(req, completion));
 });
 
@@ -260,5 +348,11 @@ router.post('/bookings/:id/cancel', (req, res) => {
   }
   return res.redirect('/account');
 });
+
+// Exposed so scripts/check.js can pin the pop-up’s rules — the Current / history
+// split, the tick, the locals it renders — against real rows, without HTTP.
+router.panelGroups = panelGroups;
+router.panelBody = panelBody;
+router.panelWanted = panelWanted;
 
 module.exports = router;

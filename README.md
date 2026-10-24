@@ -23,6 +23,7 @@ simulated.
 - [Database schema and migrations](#database-schema-and-migrations)
 - [How availability and double-booking prevention work](#how-availability-and-double-booking-prevention-work)
 - [Customer profile completion and the booking gate](#customer-profile-completion-and-the-booking-gate)
+- [The account pop-up and the shared sheet](#the-account-pop-up-and-the-shared-sheet)
 - [Booking tickets (PDF)](#booking-tickets-pdf)
 - [Staff portal (`/portal`)](#staff-portal-portal)
 - [Editing the catalogue, hours and booking rules](#editing-the-catalogue-hours-and-booking-rules)
@@ -348,6 +349,64 @@ so in as many words, and it is not presented as an identity or government check.
 
 ---
 
+## The account pop-up and the shared sheet
+
+The header's account control is still an ordinary link to `/account`. With
+JavaScript on, `public/main.js` intercepts the click, opens the
+`<dialog id="account-panel">` that every signed-in page carries, and fills it from
+`GET /account/panel`. That route sits behind the same `requireUser` as `/account`
+and answers with the fragment in `views/partials/account-panel.ejs`, marked
+`X-Naina-Panel: 1` and `Cache-Control: no-store`. Nothing about the page behind
+changes and the address bar stays where it was; if the session has expired, the
+fragment comes back as a redirect and the script follows it to the sign-in page
+instead of pasting a whole layout into the sheet.
+
+**The two lists.** `panelGroups()` in `src/routes/account.js` builds them from
+`slots.listUserBookings()`, the same rows `/account` reads:
+
+| Tab | Holds | Statuses a row can show |
+| --- | --- | --- |
+| Current bookings | everything the diary still carries | pending, confirmed, rejected, cancelled |
+| Booking history | the whole record | pending, confirmed, completed, rejected, cancelled |
+
+Only a completed booking leaves Current, so the tabs overlap on purpose and the
+copy under each heading says which question it answers. Statuses are printed from
+the row (`booking.status`), never inferred; a confirmed booking with a ticket
+offers the same `/account/ticket/:id` link the account page does. Each list has
+its own empty state, and the panel never renders another customer's rows — the
+owner comes from the session, not the request.
+
+**Editing without leaving.** *Edit profile* and *Edit photo* swap the panel to the
+same shared editor (`views/partials/profile-fields.ejs`) the profile page uses,
+with its ids prefixed `ap-` so two copies can never collide, and post to the same
+`POST /account/profile`. The panel's fetch adds `X-Naina-Panel: 1`; the route then
+answers with the rebuilt fragment — `200` with the saved values, or `400` with the
+same inline errors and nothing written — instead of a redirect. The identical post
+without that header still redirects, so the no-JS form behaves exactly as before.
+The header avatar is repainted from the fragment's `data-photo-path`, and the
+verification tick only appears while `profile.completeness()` says every detail is
+on file: clearing the address in the editor removes it in the same re-render.
+Sign out is the site's existing `POST /auth/logout` form with its CSRF field.
+
+**One controller for every pop-up.** Both `<dialog>`s on the public site — the
+account panel and the booking step panel — are managed by the same
+`openSheet`/`closeSheet` pair in `public/main.js`. Opening one calls `showModal()`,
+marks the page with `data-popup-open` (overflow hidden, with the scrollbar width
+banked in `--popup-gap` so nothing shifts sideways) and puts the previous scroll
+position back after the lock. Sheets stack: opening the account panel over the
+booking panel keeps the page locked until the last one closes, and a sheet only
+releases the lock when it has really left the screen. The × is a real
+`<button data-popup-close>` with an `aria-label`, first in the sheet's focus order,
+and it closes only its own sheet. A click on the scrim closes a sheet unless one
+of its fields holds typing the customer has not saved; Escape always closes, and
+once the account sheet shuts its fetched contents are dropped from the document.
+The panels are centred squircle cards (30 px radius, hairline warm border, soft
+shadow), 620 px wide on desktop and, below 700 px, the screen width less a safe
+margin at each edge (19 px at the default text size), with the account panel's
+body scrolling inside itself when the content is taller than the screen.
+
+---
+
 ## Booking tickets (PDF)
 
 A request is a request until someone at the counter says otherwise. The
@@ -616,6 +675,13 @@ the slot).
   top-left — first it returns to the times, then it closes the panel — and it never
   clears the chosen day, the chosen time or the typed details, because nothing is
   stored in the browser.
+- Both pop-ups carry a visible × with an accessible name ("Close the booking
+  panel", "Close the account panel") as the first control in the sheet, and it is
+  reachable and operable by keyboard. Escape closes either one; a scrim click closes
+  it too unless a field holds unsaved typing. The page behind cannot scroll while a
+  sheet is open and returns to the same scroll position afterwards. Sheets fit the
+  viewport at 375, 690 and 1280 px, and below 700 px they use the screen width less
+  a safe edge margin, with their own internal scrolling.
 - The frangipani sprigs are `aria-hidden`, `pointer-events: none`, sized to fit
   inside a section's own padding band so they cannot overlap a line of text, and
   dropped below 860 px and in print.

@@ -58,7 +58,7 @@
           <%# Booking lives in the hero, the nav and every service page. The header carries
               the account controls only, so one action per strip and no squeezed buttons. %>
           <% if (currentUser) { %>
-            <a class="header-account" href="/account" aria-label="My account and profile">
+            <a class="header-account" href="/account" aria-label="My account and profile" data-account-trigger>
               <% if (currentUser.photo_path) { %>
                 <img class="header-account__img" src="<%= currentUser.photo_path %>" alt="" width="32" height="32">
               <% } else { %>
@@ -83,6 +83,30 @@
         </div>
       </div>
     </header>
+
+    <% if (currentUser) { %>
+      <%#
+        The account pop-up. It lives outside <main> and starts closed: main.js
+        fills it from /account/panel and re-opens it with showModal(), so the page
+        behind never changes. The tick, the details and the two booking lists all
+        come from that fragment, because completeness is decided in the database
+        and not here. With JavaScript off this dialog is simply never opened and
+        the header icon keeps working as the link it is.
+      %>
+      <dialog class="poppanel" id="account-panel" data-account-panel aria-labelledby="account-panel-title">
+        <div class="poppanel__bar">
+          <h2 class="poppanel__title" id="account-panel-title">My account</h2>
+          <button class="popup__close" type="button" data-popup-close aria-label="Close the account panel">
+            <svg class="icon" aria-hidden="true" focusable="false" viewBox="0 0 24 24" width="20" height="20">
+              <path d="M6 6l12 12M18 6L6 18" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"></path>
+            </svg>
+          </button>
+        </div>
+        <div class="poppanel__body" data-account-panel-body>
+          <p class="loading" data-visible="true"><span class="spinner"></span> Loading your account…</p>
+        </div>
+      </dialog>
+    <% } %>
 
     <main id="main">
       <%- include('flash') %>

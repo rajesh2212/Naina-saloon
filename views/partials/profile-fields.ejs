@@ -1,0 +1,169 @@
+<%
+  /**
+   * The profile editor in one place: the details the studio asks for, the two
+   * optional fields, the photo picker and the submit row. /account/profile puts
+   * it in a section of its own; the account pop-up puts the same markup inside
+   * its panel. Both post to the same route with the same field names, so there is
+   * one validator and one save path however the form was reached.
+   *
+   *   idPrefix  — the pop-up renders with "ap-" so the page and the panel can
+   *               hold an editor at the same time without sharing an id.
+   *   inPanel   — the pop-up shape: no "Back to my bookings" link, no <noscript>
+   *               note (the panel is already a JavaScript-only view).
+   *   photoOnly — "Edit photo" shows just the picker, and carries the other
+   *               details as hidden values so saving a picture cannot blank a
+   *               field the customer left on another screen.
+   */
+  var errs = locals.errors || {};
+  var vals = locals.values || {};
+  var shownUser = locals.user || currentUser;
+  var completion = locals.completion || { percent: 0, complete: false, steps: [], missing: [] };
+  var blocks = locals.blocks || [];
+  var addressMax = locals.addressMax || 300;
+  var p = locals.idPrefix || '';
+  var inPanel = Boolean(locals.inPanel);
+  var photoOnly = Boolean(locals.photoOnly);
+  var photo = shownUser.photo_path || null;
+  var photoHasError = Boolean(errs.photo);
+%>
+
+<form method="post" action="/account/profile"
+      class="<%= inPanel ? 'panel-form' : 'mt-1' %>"
+      enctype="application/x-www-form-urlencoded"<%= inPanel ? ' data-panel-form' : '' %>>
+  <%- csrfField() %>
+  <% if (inPanel) { %>
+    <%# Which screen to hand back when a saved panel post needs re-rendering the
+        editor instead of the details. A plain form post never carries it. %>
+    <input type="hidden" name="panel_mode" value="<%= photoOnly ? 'photo' : 'profile' %>">
+  <% } %>
+  <% if (photoOnly) { %>
+    <input type="hidden" name="name" value="<%= vals.name %>">
+    <input type="hidden" name="phone" value="<%= vals.phone %>">
+    <input type="hidden" name="age" value="<%= vals.age %>">
+    <input type="hidden" name="address" value="<%= vals.address %>">
+    <input type="hidden" name="block" value="<%= vals.block %>">
+    <input type="hidden" name="preferred_title" value="<%= vals.preferredTitle %>">
+    <input type="hidden" name="notes" value="<%= vals.notes %>">
+  <% } else { %>
+    <div class="field">
+      <label for="<%= p %>name">Name</label>
+      <input class="input" id="<%= p %>name" name="name" type="text" autocomplete="name" required maxlength="80"
+             value="<%= vals.name %>"
+             aria-describedby="<%= p %>name-hint<%= errs.name ? ' ' + p + 'name-error' : '' %>"
+             <% if (errs.name) { %>aria-invalid="true"<% } %>>
+      <% if (errs.name) { %><p class="error" id="<%= p %>name-error"><%= errs.name %></p><% } %>
+      <p class="hint" id="<%= p %>name-hint">How the studio greets you and writes the diary entry.</p>
+    </div>
+
+    <div class="field">
+      <label for="<%= p %>email">Email</label>
+      <input class="input" id="<%= p %>email" type="email" value="<%= shownUser.email %>" disabled aria-describedby="<%= p %>email-hint">
+      <p class="hint" id="<%= p %>email-hint">
+        Your sign-in address cannot be edited here — it is tied to the reset links. <a href="/auth/register">Register a new account</a>
+        if you have moved to a different address.
+      </p>
+    </div>
+
+    <div class="field">
+      <label for="<%= p %>phone">Mobile number</label>
+      <input class="input" id="<%= p %>phone" name="phone" type="tel" inputmode="tel" autocomplete="tel"
+             maxlength="20" value="<%= vals.phone %>"
+             aria-describedby="<%= p %>phone-hint<%= errs.phone ? ' ' + p + 'phone-error' : '' %>"
+             <% if (errs.phone) { %>aria-invalid="true"<% } %>>
+      <% if (errs.phone) { %><p class="error" id="<%= p %>phone-error"><%= errs.phone %></p><% } %>
+      <p class="hint" id="<%= p %>phone-hint">Pre-filled on each booking so the counter can reach you.</p>
+    </div>
+
+    <div class="field">
+      <label for="<%= p %>age">Age</label>
+      <input class="input input--narrow" id="<%= p %>age" name="age" type="text" inputmode="numeric"
+             autocomplete="off" maxlength="3" value="<%= vals.age %>"
+             aria-describedby="<%= p %>age-hint<%= errs.age ? ' ' + p + 'age-error' : '' %>"
+             <% if (errs.age) { %>aria-invalid="true"<% } %>>
+      <% if (errs.age) { %><p class="error" id="<%= p %>age-error"><%= errs.age %></p><% } %>
+      <p class="hint" id="<%= p %>age-hint">Whole years. The studio uses it to choose the right products.</p>
+    </div>
+
+    <div class="field">
+      <label for="<%= p %>address">Address</label>
+      <textarea class="textarea textarea--short" id="<%= p %>address" name="address" rows="3"
+                maxlength="<%= addressMax %>"
+                aria-describedby="<%= p %>address-hint<%= errs.address ? ' ' + p + 'address-error' : '' %>"
+                <% if (errs.address) { %>aria-invalid="true"<% } %>><%= vals.address %></textarea>
+      <% if (errs.address) { %><p class="error" id="<%= p %>address-error"><%= errs.address %></p><% } %>
+      <p class="hint" id="<%= p %>address-hint">Write it yourself, however you would give it to the counter — house or street, landmark, pin code.</p>
+    </div>
+
+    <div class="field">
+      <label for="<%= p %>block">Block you live in</label>
+      <select class="select" id="<%= p %>block" name="block"
+              aria-describedby="<%= p %>block-hint<%= errs.block ? ' ' + p + 'block-error' : '' %>"
+              <% if (errs.block) { %>aria-invalid="true"<% } %>>
+        <option value="">Choose your Block&hellip;</option>
+        <% blocks.forEach(function (block) { %>
+          <option value="<%= block %>"<%= vals.block === block ? ' selected' : '' %>><%= block %></option>
+        <% }); %>
+      </select>
+      <% if (errs.block) { %><p class="error" id="<%= p %>block-error"><%= errs.block %></p><% } %>
+      <p class="hint" id="<%= p %>block-hint">One of the seven Blocks around Bhadrak that the studio serves.</p>
+    </div>
+
+    <div class="field">
+      <label for="<%= p %>preferred_title">Called as <span class="optional">(optional)</span></label>
+      <input class="input" id="<%= p %>preferred_title" name="preferred_title" type="text" maxlength="24"
+             autocomplete="nickname" placeholder="Ms., Mr., Mx., or leave blank" value="<%= vals.preferredTitle %>">
+    </div>
+
+    <div class="field">
+      <label for="<%= p %>notes">Standing notes for the studio <span class="optional">(optional)</span></label>
+      <textarea class="textarea" id="<%= p %>notes" name="notes" rows="3" maxlength="500"><%= vals.notes %></textarea>
+      <p class="hint">Anything useful every time — hair length, shade you use, which family you usually book with.</p>
+    </div>
+  <% } %>
+
+  <h2 class="field-group-title" id="<%= p %>photo-title"><%= photoOnly ? 'Your picture' : 'Profile photo' %></h2>
+  <div class="field photo-picker" data-photo-picker>
+    <label for="<%= p %>photo_file"><%= photoOnly ? 'Choose a new picture' : 'Add a picture to sit beside your name' %></label>
+    <input class="input" id="<%= p %>photo_file" type="file" accept="image/jpeg,image/png,image/webp"
+           data-photo-input aria-describedby="<%= p %>photo-hint <%= p %>photo-preview-state<%= photoHasError ? ' ' + p + 'photo-error' : '' %>"
+           <% if (photoHasError) { %>aria-invalid="true"<% } %>>
+    <input type="hidden" name="photo_data" data-photo-data>
+    <img class="photo-preview" data-photo-preview alt="Preview of the new profile photo" hidden>
+    <% if (photoHasError) { %><p class="error" id="<%= p %>photo-error"><%= errs.photo %></p><% } %>
+    <p class="hint" id="<%= p %>photo-hint">
+      Cropped to a square and shrunk by your browser before it is sent, so nothing large leaves this
+      device. JPEG, PNG or WebP.
+    </p>
+    <p class="photo-state" id="<%= p %>photo-preview-state" data-photo-state<%= photo ? '' : ' hidden' %>>
+      <%= photo ? 'A photo is saved on your profile.' : 'No photo yet.' %>
+    </p>
+    <% if (photo) { %>
+      <label class="checkline">
+        <input type="checkbox" name="remove_photo" value="1" data-photo-remove>
+        Remove the current photo
+      </label>
+    <% } %>
+    <% if (!inPanel) { %>
+      <noscript>
+        <p class="form-note">
+          Choosing a picture needs JavaScript, because the crop happens in your browser. Without it the
+          other details still save — ask at the counter and the team can note a photo for you.
+        </p>
+      </noscript>
+    <% } %>
+  </div>
+
+  <div class="form-actions">
+    <button class="btn btn--primary" type="submit"><%= inPanel ? 'Save changes' : 'Save details' %></button>
+    <% if (inPanel) { %>
+      <button class="btn btn--ghost" type="button" data-panel-cancel>Cancel</button>
+    <% } else { %>
+      <a class="btn btn--ghost" href="/account">Back to my bookings</a>
+    <% } %>
+  </div>
+  <% if (!completion.complete) { %>
+    <p class="form-note">
+      Saving a part-filled profile is fine — <%= inPanel ? 'the studio needs all of it' : 'the bar above shows what is left, and the studio needs all of it' %> before it will hold a chair time.
+    </p>
+  <% } %>
+</form>

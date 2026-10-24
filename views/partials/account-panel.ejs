@@ -1,0 +1,182 @@
+<%
+  /**
+   * The account pop-up body, fetched by /account/panel and dropped into the
+   * <dialog> the header opens. Nothing here is a page: the site behind stays put,
+   * the URL does not change, and every value comes from the same sources the
+   * /account screens read — the signed-in row, slots.listUserBookings() and
+   * profile.completeness(). Ownership is enforced by requireUser on the router,
+   * so this fragment can only ever be rendered for the customer it belongs to.
+   *
+   * Three modes: "view" (details + the two booking lists + sign out), "profile"
+   * (the shared editor) and "photo" (the picker on its own). The editor modes
+   * post to the same route as the full page.
+   */
+  var mode = locals.panelMode || 'view';
+  var user = locals.user || currentUser;
+  var errs = locals.errors || {};
+  var vals = locals.values || {};
+  var completion = locals.completion || { percent: 0, complete: false, steps: [], missing: [] };
+  var notice = locals.notice || null;
+  var noticeKind = locals.noticeKind === 'error' ? 'error' : 'success';
+  var current = locals.current || [];
+  var history = locals.history || [];
+  var photo = user.photo_path || null;
+  var initials = String(user.name || '').trim().split(/\s+/).slice(0, 2).map(function (w) { return w.charAt(0); }).join('').toUpperCase();
+%>
+
+<% if (mode === 'profile' || mode === 'photo') { %>
+  <h2 class="poppanel__title" id="ap-edit-title"><%= mode === 'photo' ? 'Your picture' : 'Edit your details' %></h2>
+  <p class="muted small">
+    <% if (mode === 'photo') { %>
+      The crop and the shrink happen in your browser, so a phone camera never sends a full-size file.
+    <% } else { %>
+      This is the same form as the details page — the studio needs all of it before it will hold a chair time.
+    <% } %>
+  </p>
+
+  <%- include('profile-fields', {
+    errors: errs,
+    values: vals,
+    user: user,
+    blocks: locals.blocks || [],
+    completion: completion,
+    addressMax: locals.addressMax || 300,
+    idPrefix: 'ap-',
+    inPanel: true,
+    photoOnly: mode === 'photo'
+  }) %>
+
+<% } else { %>
+  <header class="poppanel__id">
+    <%# main.js reads this back to repaint the header icon after a photo change,
+        so the strip at the top of the page cannot disagree with the panel. %>
+    <div class="avatar" data-account-avatar data-photo-path="<%= photo || '' %>">
+      <% if (photo) { %>
+        <img class="avatar__img" src="<%= photo %>" alt="Your profile photo" width="72" height="72">
+      <% } else { %>
+        <span class="avatar__img avatar__img--empty" aria-hidden="true"><%= initials || '&amp;' %></span>
+      <% } %>
+      <%# The tick follows the site’s verification rule and nothing else: it appears
+          when profile.completeness() says every detail is on file, never as decoration. %>
+      <% if (completion.complete) { %>
+        <span class="profile-tick profile-tick--upper" title="Profile complete">
+          <svg class="profile-tick__icon" width="16" height="16" viewBox="0 0 24 24" role="img" aria-label="Profile complete" focusable="false">
+            <path d="M4 13l5 5L20 6" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"></path>
+          </svg>
+        </span>
+      <% } %>
+    </div>
+    <div class="profile-id__text">
+      <p class="profile-id__name"><%= user.name %></p>
+      <p class="muted small"><%= user.email %></p>
+      <p class="poppanel__state">
+        <% if (completion.complete) { %>
+          Every detail the studio asks for is on file.
+        <% } else { %>
+          Profile is <%= completion.percent %>% complete — still to add: <%= completion.missing.join(', ') %>.
+        <% } %>
+      </p>
+    </div>
+  </header>
+
+  <% if (notice) { %>
+    <p class="alert alert--<%= noticeKind %>" role="status"><%= notice %></p>
+  <% } %>
+
+  <div class="poppanel__actions">
+    <a class="btn btn--ghost btn--sm" href="/account/profile" data-panel-edit="profile">Edit profile</a>
+    <a class="btn btn--ghost btn--sm" href="/account/profile#photo-title" data-panel-edit="photo">Edit photo</a>
+  </div>
+
+  <h2 class="poppanel__title">Your details</h2>
+  <div class="summary">
+    <dl>
+      <dt>Name</dt><dd><%= user.name %></dd>
+      <dt>Phone</dt><dd><%= user.phone || 'Not given' %></dd>
+      <dt>Age</dt><dd><%= user.age === null || user.age === undefined ? 'Not given' : user.age %></dd>
+      <dt>Address</dt><dd><%= user.address || 'Not given' %></dd>
+      <dt>Block</dt><dd><%= user.block || 'Not given' %></dd>
+      <dt>Called as</dt><dd><%= user.preferred_title || 'Not set' %></dd>
+      <% if (user.notes) { %><dt>Notes</dt><dd class="poppanel__wrap"><%= user.notes %></dd><% } %>
+      <dt>Member since</dt><dd><%= dates.formatStampDate(user.created_at) %></dd>
+    </dl>
+  </div>
+
+  <h2 class="poppanel__title">Your bookings</h2>
+  <div class="tabs" role="tablist" aria-label="Your bookings">
+    <button class="tab" type="button" role="tab" id="ap-tab-current" aria-controls="ap-list-current"
+            aria-selected="true" data-panel-tab="current">
+      Current bookings <span class="tab__count"><%= current.length %></span>
+    </button>
+    <button class="tab" type="button" role="tab" id="ap-tab-history" aria-controls="ap-list-history"
+            aria-selected="false" data-panel-tab="history" tabindex="-1">
+      Booking history <span class="tab__count"><%= history.length %></span>
+    </button>
+  </div>
+
+  <div class="poppanel__panels">
+    <div id="ap-list-current" role="tabpanel" aria-labelledby="ap-tab-current" data-panel-list="current" tabindex="-1">
+      <p class="poppanel__says">
+        Everything that is not completed yet — a pending request waits here, and so does a booking the
+        studio has confirmed, rejected or cancelled.
+      </p>
+      <% if (!current.length) { %>
+        <p class="empty">No current bookings. Choose a service and a free time, and the request shows here.</p>
+        <p class="form-actions"><a class="btn btn--sm" href="/book">Book an appointment</a></p>
+      <% } else { %>
+        <div class="admin-list">
+          <% current.forEach(function (booking) { %>
+            <article class="card card--flat poppanel__row">
+              <div class="flex flex--between">
+                <h3 class="card__title mb-0"><%= booking.service_name %></h3>
+                <span class="pill pill--<%= booking.status %>"><%= booking.status %></span>
+              </div>
+              <p class="muted small mt-1"><%= booking.dayLabel %> · <%= booking.timeLabel %> · reference #<%= booking.id %></p>
+              <p class="small">
+                <% if (booking.hasTicket) { %>
+                  <a href="/account/ticket/<%= booking.id %>">Download ticket (PDF)</a>
+                <% } else if (booking.status === 'pending') { %>
+                  Waiting for the studio to confirm.
+                <% } else { %>
+                  <%= booking.category_name %> · <%= booking.duration_minutes %> min
+                <% } %>
+              </p>
+            </article>
+          <% }) %>
+        </div>
+      <% } %>
+    </div>
+
+    <div id="ap-list-history" role="tabpanel" aria-labelledby="ap-tab-history" data-panel-list="history" tabindex="-1" hidden>
+      <p class="poppanel__says">
+        Your whole record — every request you have made, whatever it ended as: pending, confirmed,
+        completed, rejected or cancelled.
+      </p>
+      <% if (!history.length) { %>
+        <p class="empty">Nothing booked yet. Your requests will be listed here from the first one.</p>
+      <% } else { %>
+        <ul class="poppanel__list">
+          <% history.forEach(function (booking) { %>
+            <li>
+              <span class="poppanel__li-service"><%= booking.service_name %></span>
+              <span class="muted small"><%= booking.dayLabel %> · <%= booking.timeLabel %> · requested <%= dates.formatStampDate(booking.created_at) %></span>
+              <span class="pill pill--<%= booking.status %>"><%= booking.status %></span>
+              <% if (booking.hasTicket) { %><a class="small" href="/account/ticket/<%= booking.id %>">Ticket</a><% } %>
+            </li>
+          <% }) %>
+        </ul>
+      <% } %>
+    </div>
+  </div>
+
+  <footer class="poppanel__foot">
+    <a class="btn btn--ghost btn--sm" href="/account">My bookings page</a>
+    <% if (isAdmin) { %><a class="btn btn--primary btn--sm" href="/portal">Staff area</a><% } %>
+    <%# The existing sign-out: a real POST to /auth/logout, so it works with or
+        without JavaScript and clears the same session the pages use. %>
+    <form method="post" action="/auth/logout" class="poppanel__signout">
+      <%- csrfField() %>
+      <button class="btn btn--ghost btn--sm" type="submit">Sign out</button>
+    </form>
+  </footer>
+<% } %>

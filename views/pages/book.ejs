@@ -94,6 +94,13 @@
         <strong><%= service.name %></strong>
         <span class="small" data-panel-where><%= dates.formatLongDate(picked) %></span>
       </p>
+      <%# The × only appears once main.js has marked this dialog modal — while the
+          sheet is still an in-flow card on a no-JS page there is nothing to close. %>
+      <button class="popup__close" type="button" data-popup-close aria-label="Close the booking panel">
+        <svg class="icon" aria-hidden="true" focusable="false" viewBox="0 0 24 24" width="20" height="20">
+          <path d="M6 6l12 12M18 6L6 18" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"></path>
+        </svg>
+      </button>
     </div>
 
     <div class="wrap booking-layout">

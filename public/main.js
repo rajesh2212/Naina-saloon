@@ -22,7 +22,279 @@
     });
   }
 
-  // ---------------------------------------------------- password reveal
+  // ------------------------------------------------------- pop-ups: one sheet
+  // Every pop-up on this site is a real <dialog>, and they all behave the same
+  // way: the sheet floats centred over a scrim, the page behind stops scrolling
+  // and then goes back to exactly where it was, and the × in its corner closes
+  // that one sheet. The × and the outside click are handled by delegation, so a
+  // dialog filled in later — the account panel arrives by fetch — needs nothing
+  // re-bound. A click outside is refused while an editor in the sheet holds
+  // typing the customer has not saved; Escape always works, since closing is
+  // never the destructive direction there.
+  var page = doc.documentElement;
+  // Which sheets the visitor is looking at right now, in the order they opened.
+  // A counter would be wrong here: opening a second sheet over the first must
+  // keep the page locked, and a stale close event arriving late must not unlock
+  // a sheet that is still on screen.
+  var openSheets = [];
+  var closeHooks = [];
+
+  function sheetHasEdits(sheet) {
+    var fields = sheet.querySelectorAll('input, textarea, select');
+    for (var i = 0; i < fields.length; i += 1) {
+      var field = fields[i];
+      if (field.type === 'checkbox' || field.type === 'radio') {
+        if (field.checked !== field.defaultChecked) return true;
+      } else if (field.value !== field.defaultValue) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  function syncPageLock() {
+    if (openSheets.length) {
+      if (page.hasAttribute('data-popup-open')) return;
+      var gap = Math.max(0, window.innerWidth - page.clientWidth);
+      page.style.setProperty('--popup-gap', gap + 'px');
+      page.setAttribute('data-popup-open', '');
+      return;
+    }
+    page.removeAttribute('data-popup-open');
+    page.style.removeProperty('--popup-gap');
+  }
+
+  function releaseSheet(sheet) {
+    var at = openSheets.indexOf(sheet);
+    if (at > -1) openSheets.splice(at, 1);
+    syncPageLock();
+    closeHooks.forEach(function (hook) {
+      if (hook.sheet === sheet) hook.fn();
+    });
+  }
+
+  /** A sheet can hand its own cleanup to this controller without knowing its rules. */
+  function onSheetClose(sheet, fn) {
+    closeHooks.push({ sheet: sheet, fn: fn });
+  }
+
+  function openSheet(sheet) {
+    var wasScroll = window.scrollY;
+    sheet.setAttribute('data-modal', 'true');
+    // showModal() refuses a sheet that is already on screen.
+    if (sheet.open) sheet.close();
+    if (openSheets.indexOf(sheet) === -1) openSheets.push(sheet);
+    syncPageLock();
+    sheet.showModal();
+    // The lock can shorten the page by the scrollbar it hid, so put the visitor
+    // back on the row they were reading before the sheet covers it.
+    window.scrollTo(0, wasScroll);
+    // The sheet itself, not the first control in it: opening a panel should not
+    // leave the × one Enter key away from closing it again.
+    sheet.focus({ preventScroll: true });
+  }
+
+  function closeSheet(sheet) {
+    if (sheet.open) sheet.close();
+    sheet.removeAttribute('data-modal');
+    releaseSheet(sheet);
+  }
+
+  doc.querySelectorAll('dialog').forEach(function (sheet) {
+    // The browser's own directions — Escape above all — close a sheet without
+    // asking this script. Only a sheet that really left the screen may release
+    // the lock, so a close event still in the queue from an earlier re-open
+    // cannot unlock a sheet that is open again.
+    sheet.addEventListener('close', function () {
+      if (!sheet.open) releaseSheet(sheet);
+    });
+    // Escape is the browser's own close direction. Releasing the page here too
+    // means the lock never outlives the sheet, whatever the engine does with the
+    // close event — and closing is never the destructive direction, so an editor
+    // full of unsaved typing still gets away.
+    sheet.addEventListener('keydown', function (event) {
+      if (event.key === 'Escape') closeSheet(sheet);
+    });
+    // A click that lands on the dialog element itself came from the scrim.
+    sheet.addEventListener('click', function (event) {
+      if (event.target !== sheet || sheetHasEdits(sheet)) return;
+      closeSheet(sheet);
+    });
+  });
+
+  doc.addEventListener('click', function (event) {
+    var button = event.target.closest ? event.target.closest('[data-popup-close]') : null;
+    if (!button) return;
+    var sheet = button.closest('dialog');
+    if (sheet) closeSheet(sheet);
+  });
+
+  // ---------------------------------------------------- account: the pop panel
+  // The header icon is a real link to /account; this only intercepts the click.
+  // Everything the panel shows is fetched from /account/panel, so the details,
+  // the two booking lists and the tick all come from the same reads the account
+  // pages do — and the customer's own session decides whose they are.
+  var accountPanel = doc.querySelector('[data-account-panel]');
+  var accountTrigger = doc.querySelector('[data-account-trigger]');
+  if (accountPanel && accountTrigger) {
+    var accountBody = accountPanel.querySelector('[data-account-panel-body]');
+
+    function syncHeaderAvatar(root) {
+      var avatar = root.querySelector('[data-account-avatar]');
+      if (!avatar) return;
+      var path = avatar.getAttribute('data-photo-path') || '';
+      var image = accountTrigger.querySelector('.header-account__img');
+      var icon = accountTrigger.querySelector('.header-account__icon');
+      if (path) {
+        if (!image) {
+          image = doc.createElement('img');
+          image.className = 'header-account__img';
+          image.alt = '';
+          image.width = 32;
+          image.height = 32;
+          accountTrigger.insertBefore(image, accountTrigger.firstChild);
+        }
+        if (image.getAttribute('src') !== path) image.setAttribute('src', path);
+        image.hidden = false;
+        if (icon) icon.hidden = true;
+        return;
+      }
+      if (image) image.remove();
+      if (icon) icon.hidden = false;
+    }
+
+    function showPanel(markup) {
+      accountBody.innerHTML = markup;
+      accountBody.scrollTop = 0;
+      syncHeaderAvatar(accountPanel);
+    }
+
+    function fetchPanel(url) {
+      return fetch(url, { headers: { accept: 'text/html' }, credentials: 'same-origin' })
+        .then(function (response) {
+          // A sign-in wall or an expired session answers with a whole page.
+          // Send the browser to it instead of pasting it into the sheet.
+          if (response.redirected || response.headers.get('x-naina-panel') !== '1') {
+            window.location.assign(url);
+            return '';
+          }
+          return response.text();
+        })
+        .then(function (markup) {
+          if (markup) showPanel(markup);
+        })
+        .catch(function () {
+          accountBody.textContent = '';
+          var note = doc.createElement('p');
+          note.className = 'alert alert--error';
+          note.setAttribute('role', 'alert');
+          note.textContent = 'Could not reach the studio. Please open My bookings instead.';
+          accountBody.appendChild(note);
+        });
+    }
+
+    function selectTab(which) {
+      accountPanel.querySelectorAll('[data-panel-tab]').forEach(function (button) {
+        var on = button.getAttribute('data-panel-tab') === which;
+        button.setAttribute('aria-selected', on ? 'true' : 'false');
+        button.tabIndex = on ? 0 : -1;
+      });
+      accountPanel.querySelectorAll('[data-panel-list]').forEach(function (list) {
+        list.hidden = list.getAttribute('data-panel-list') !== which;
+      });
+    }
+
+    accountTrigger.setAttribute('aria-haspopup', 'dialog');
+    accountTrigger.setAttribute('aria-controls', accountPanel.id);
+    accountTrigger.addEventListener('click', function (event) {
+      if (event.metaKey || event.ctrlKey || event.shiftKey || event.button !== 0) return;
+      event.preventDefault();
+      openSheet(accountPanel);
+      accountTrigger.setAttribute('aria-expanded', 'true');
+      fetchPanel('/account/panel');
+    });
+    onSheetClose(accountPanel, function () {
+      accountTrigger.setAttribute('aria-expanded', 'false');
+      // Drop the details and the booking list off the page once the sheet is shut.
+      accountBody.textContent = '';
+    });
+
+    accountPanel.addEventListener('click', function (event) {
+      var tab = event.target.closest('[data-panel-tab]');
+      if (tab) {
+        event.preventDefault();
+        selectTab(tab.getAttribute('data-panel-tab'));
+        tab.focus();
+        return;
+      }
+      var edit = event.target.closest('[data-panel-edit]');
+      if (edit) {
+        event.preventDefault();
+        fetchPanel('/account/panel?edit=' + encodeURIComponent(edit.getAttribute('data-panel-edit')));
+        return;
+      }
+      if (event.target.closest('[data-panel-cancel]')) {
+        event.preventDefault();
+        fetchPanel('/account/panel');
+      }
+    });
+
+    // Tablist arrows, because role="tablist" promises them.
+    accountPanel.addEventListener('keydown', function (event) {
+      if (event.key !== 'ArrowRight' && event.key !== 'ArrowLeft') return;
+      var tab = event.target.closest('[data-panel-tab]');
+      if (!tab) return;
+      var tabs = Array.prototype.slice.call(accountPanel.querySelectorAll('[data-panel-tab]'));
+      var next = tabs[(tabs.indexOf(tab) + (event.key === 'ArrowRight' ? 1 : tabs.length - 1)) % tabs.length];
+      event.preventDefault();
+      selectTab(next.getAttribute('data-panel-tab'));
+      next.focus();
+    });
+
+    // The editor saves through the same /account/profile route the page uses, with
+    // one header to say which screen asked. The server answers with this sheet
+    // already rebuilt, so a save shows the new details without a page change.
+    accountPanel.addEventListener('submit', function (event) {
+      var form = event.target.closest('[data-panel-form]');
+      if (!form) return;
+      event.preventDefault();
+      var button = form.querySelector('button[type="submit"]');
+      if (button) button.disabled = true;
+      fetch(form.action, {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: {
+          accept: 'text/html',
+          'content-type': 'application/x-www-form-urlencoded',
+          'x-naina-panel': '1',
+        },
+        body: new URLSearchParams(new FormData(form)).toString(),
+      })
+        .then(function (response) {
+          if (response.redirected || response.headers.get('x-naina-panel') !== '1') {
+            window.location.assign(form.action);
+            return '';
+          }
+          return response.text();
+        })
+        .then(function (markup) {
+          if (!markup) return;
+          showPanel(markup);
+          var back = accountPanel.querySelector('[data-panel-tab]');
+          if (back) back.focus();
+        })
+        .catch(function () {
+          if (button) button.disabled = false;
+          var note = doc.createElement('p');
+          note.className = 'alert alert--error';
+          note.setAttribute('role', 'alert');
+          note.textContent = 'That save did not go through. Nothing was changed — please try again.';
+          accountBody.insertBefore(note, accountBody.firstChild);
+        });
+    });
+  }
+
+  // ---------------------------------------------------- auth: show the password
   // The input keeps its real `type="password"` without JS; this only ever changes
   // the one field the button points at, and says which state it is in.
   doc.querySelectorAll('[data-reveal]').forEach(function (button) {
@@ -57,86 +329,96 @@
   // ------------------------------------------- profile photo: crop, shrink, send
   // The picture is squared and resized here so a phone camera never leaves the
   // device at full size. The server re-checks every byte regardless.
-  var photoInput = doc.querySelector('[data-photo-input]');
-  if (photoInput) {
-    var photoData = doc.querySelector('[data-photo-data]');
-    var photoPreview = doc.querySelector('[data-photo-preview]');
-    var photoState = doc.querySelector('[data-photo-state]');
-    var photoRemove = doc.querySelector('[data-photo-remove]');
-    var SIDE = 256;
+  // Bound by delegation because two editors can be on screen at once — the one on
+  // /account/profile and the one inside the account pop-up, whose markup arrives
+  // after this script has run. Each picker only touches its own container.
+  var SIDE = 256;
 
-    var say = function (message) {
-      if (photoState) {
-        photoState.hidden = false;
-        photoState.textContent = message;
-      }
-    };
+  function photoState(box) {
+    return box.querySelector('[data-photo-state]');
+  }
 
-    var clearPick = function () {
-      photoData.value = '';
-      if (photoPreview) {
-        photoPreview.removeAttribute('src');
-        photoPreview.hidden = true;
-      }
-    };
+  function photoSay(box, message) {
+    var state = photoState(box);
+    if (!state) return;
+    state.hidden = false;
+    state.textContent = message;
+  }
 
-    var paint = function (source, width, height) {
-      var canvas = doc.createElement('canvas');
-      canvas.width = SIDE;
-      canvas.height = SIDE;
-      var ctx = canvas.getContext('2d');
-      if (!ctx) {
-        say('This browser cannot resize the picture, so it was not attached. Your other details still save.');
-        return;
-      }
-      var side = Math.min(width, height);
-      ctx.fillStyle = '#fdf8f4';
-      ctx.fillRect(0, 0, SIDE, SIDE);
-      ctx.drawImage(source, (width - side) / 2, (height - side) / 2, side, side, 0, 0, SIDE, SIDE);
-      var url = canvas.toDataURL('image/jpeg', 0.82);
-      photoData.value = url;
-      if (photoPreview) {
-        photoPreview.src = url;
-        photoPreview.hidden = false;
-      }
-      say('Squared and shrunk to ' + SIDE + ' px — it saves with the rest of your details.');
-    };
+  function photoClear(box) {
+    var data = box.querySelector('[data-photo-data]');
+    if (data) data.value = '';
+    var preview = box.querySelector('[data-photo-preview]');
+    if (preview) {
+      preview.removeAttribute('src');
+      preview.hidden = true;
+    }
+  }
 
-    if (photoRemove) {
-      photoRemove.addEventListener('change', function () {
-        if (!photoRemove.checked) return;
-        clearPick();
-        if (photoInput.files && photoInput.files.length) photoInput.value = '';
-        say('The saved photo will be removed when you save.');
-      });
+  function photoPaint(box, source, width, height) {
+    var canvas = doc.createElement('canvas');
+    canvas.width = SIDE;
+    canvas.height = SIDE;
+    var ctx = canvas.getContext('2d');
+    if (!ctx) {
+      photoSay(box, 'This browser cannot resize the picture, so it was not attached. Your other details still save.');
+      return;
+    }
+    var side = Math.min(width, height);
+    ctx.fillStyle = '#fdf8f4';
+    ctx.fillRect(0, 0, SIDE, SIDE);
+    ctx.drawImage(source, (width - side) / 2, (height - side) / 2, side, side, 0, 0, SIDE, SIDE);
+    var url = canvas.toDataURL('image/jpeg', 0.82);
+    var data = box.querySelector('[data-photo-data]');
+    if (data) data.value = url;
+    var preview = box.querySelector('[data-photo-preview]');
+    if (preview) {
+      preview.src = url;
+      preview.hidden = false;
+    }
+    photoSay(box, 'Squared and shrunk to ' + SIDE + ' px — it saves with the rest of your details.');
+  }
+
+  doc.addEventListener('change', function (event) {
+    var target = event.target;
+    if (!target || !target.closest) return;
+    var box = target.closest('[data-photo-picker]');
+    if (!box) return;
+
+    if (target.matches('[data-photo-remove]')) {
+      if (!target.checked) return;
+      photoClear(box);
+      var removeInput = box.querySelector('[data-photo-input]');
+      if (removeInput && removeInput.files && removeInput.files.length) removeInput.value = '';
+      photoSay(box, 'The saved photo will be removed when you save.');
+      return;
     }
 
-    photoInput.addEventListener('change', function () {
-      var file = photoInput.files && photoInput.files[0];
-      clearPick();
-      if (!file) return;
-      if (!/image\/(jpeg|png|webp)/.test(file.type)) {
-        say('That file is not a JPEG, PNG or WebP picture. Choose another one.');
-        photoInput.value = '';
-        return;
-      }
-      if (file.size > 12 * 1024 * 1024) {
-        say('That picture is over 12 MB. Choose a smaller one.');
-        photoInput.value = '';
-        return;
-      }
-      say('Reading the picture…');
-      var reader = new FileReader();
-      reader.onload = function () {
-        var img = new Image();
-        img.onload = function () { paint(img, img.naturalWidth || img.width, img.naturalHeight || img.height); };
-        img.onerror = function () { say('That picture could not be opened. Try another file.'); };
-        img.src = reader.result;
-      };
-      reader.onerror = function () { say('That picture could not be read. Try another file.'); };
-      reader.readAsDataURL(file);
-    });
-  }
+    if (!target.matches('[data-photo-input]')) return;
+    var file = target.files && target.files[0];
+    photoClear(box);
+    if (!file) return;
+    if (!/image\/(jpeg|png|webp)/.test(file.type)) {
+      photoSay(box, 'That file is not a JPEG, PNG or WebP picture. Choose another one.');
+      target.value = '';
+      return;
+    }
+    if (file.size > 12 * 1024 * 1024) {
+      photoSay(box, 'That picture is over 12 MB. Choose a smaller one.');
+      target.value = '';
+      return;
+    }
+    photoSay(box, 'Reading the picture…');
+    var reader = new FileReader();
+    reader.onload = function () {
+      var img = new Image();
+      img.onload = function () { photoPaint(box, img, img.naturalWidth || img.width, img.naturalHeight || img.height); };
+      img.onerror = function () { photoSay(box, 'That picture could not be opened. Try another file.'); };
+      img.src = reader.result;
+    };
+    reader.onerror = function () { photoSay(box, 'That picture could not be read. Try another file.'); };
+    reader.readAsDataURL(file);
+  });
 
   // -------------------------------------------- booking: the step panel
   // The page renders its second half inside a <dialog open>, which without JS is
@@ -179,12 +461,9 @@
   }
 
   if (panel) {
-    panel.setAttribute('data-modal', 'true');
-    if (panel.open) panel.close();
-    panel.showModal();
-    // The dialog itself, not the Back button: opening the sheet should not leave
-    // the first thing in it one Enter key away from closing it again.
-    panel.focus({ preventScroll: true });
+    // The shared sheet controller above owns the modal switch, the scrim click
+    // and the page lock; this only decides which step is showing.
+    openSheet(panel);
     if (panelWhere) panelWhere.setAttribute('data-day', panelWhere.textContent);
     // Nothing is pre-selected when the sheet opens, so the only reason to show
     // step four straight away is a form the server sent back with errors.
@@ -205,7 +484,7 @@
       }
       // Back to step one: the panel closes and the service and date the form
       // already holds stay filled in behind it.
-      panel.close();
+      closeSheet(panel);
       var serviceSelect = doc.querySelector('#service');
       if (serviceSelect) {
         serviceSelect.focus();

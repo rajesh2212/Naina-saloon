@@ -678,6 +678,288 @@ try {
     db.run('DELETE FROM users WHERE id = ?', ticketOwner.id);
   }
 
+  // ------------------------------------------------------- the account pop-up
+  // The fragment is built from the same reads as the /account pages, so what is
+  // worth pinning is the split between its two lists, the tick rule, and who is
+  // allowed to ask for it at all. These call the real route handlers with stubbed
+  // requests, so a rule that moved out of the server would fail here.
+  console.log('\nAccount pop-up (throwaway rows and files, deleted afterwards)');
+  const ejs = require('ejs');
+  const account = require('../src/routes/account');
+  const viewsDir = path.join(config.root, 'views');
+  const panelLayer = account.stack.find((layer) => layer.route && layer.route.path === '/panel');
+  const profilePostLayer = account.stack.find(
+    (layer) => layer.route && layer.route.path === '/profile' && layer.route.methods.post,
+  );
+
+  /** A res that renders like the app does, so the fragment can be read back. */
+  function stubRes(user) {
+    return {
+      locals: { currentUser: user },
+      headers: {},
+      view: null,
+      body: null,
+      statusCode: null,
+      redirectTo: null,
+      set(key, value) {
+        this.headers[String(key).toLowerCase()] = value;
+        return this;
+      },
+      status(code) {
+        this.statusCode = code;
+        return this;
+      },
+      render(view, locals) {
+        this.view = view;
+        const file = path.join(viewsDir, `${view}.ejs`);
+        this.body = ejs.render(fs.readFileSync(file, 'utf8'), Object.assign({
+          currentUser: user,
+          isAdmin: user.role === 'admin',
+          dates,
+          csrfField: () => '<input type="hidden" name="_csrf" value="stubbed">',
+        }, locals), { filename: file });
+        return this;
+      },
+      redirect(to) {
+        this.redirectTo = to;
+        return this;
+      },
+    };
+  }
+
+  function stubReq(user, { body = {}, query = {}, session = {}, panel = null, remember = null } = {}) {
+    if (remember) session.returnTo = remember;
+    session.csrfToken = session.csrfToken || 'stubbed';
+    return {
+      method: Object.keys(body).length ? 'POST' : 'GET',
+      originalUrl: panel === null ? '/account/profile' : '/account/panel',
+      query,
+      body,
+      session,
+      user,
+      ip: '127.0.0.1',
+      get: (name) => (String(name).toLowerCase() === 'x-naina-panel' ? panel : undefined),
+      accepts: () => 'html',
+    };
+  }
+
+  const panelStamp = Date.now();
+  const panelOwner = makeUser(`check-panel-${panelStamp}@invalid.example`, 'Panel Owner');
+  const panelOther = makeUser(`check-panelother-${panelStamp}@invalid.example`, 'Panel Stranger');
+  const panelBookings = [];
+  const panelFiles = [];
+  try {
+    const service = db.get('SELECT id FROM services WHERE is_bookable = 1 AND is_active = 1 ORDER BY id LIMIT 1');
+    const panelStatuses = ['pending', 'confirmed', 'completed', 'rejected', 'cancelled'];
+    for (let index = 0; index < panelStatuses.length; index += 1) {
+      const day = dates.addDays(dates.salonClock().date, index + 3);
+      const free = slots.availableSlots(service.id, day).slots;
+      if (!free.length) throw new Error(`no free slot on ${day} to build the two lists from`);
+      const made = slots.createBooking({
+        userId: panelOwner.id,
+        serviceId: service.id,
+        slotId: free[0].id,
+        contactName: 'Panel Owner',
+        contactPhone: '9439712994',
+      });
+      panelBookings.push(made.id);
+      // Written straight to the row: the staff route only steps between two of
+      // these, and the panel has to be tested against all five at once.
+      if (panelStatuses[index] !== 'pending') {
+        db.run('UPDATE bookings SET status = ? WHERE id = ?', panelStatuses[index], made.id);
+      }
+    }
+
+    const loaded = users.findById(panelOwner.id);
+    const groups = account.panelGroups(loaded);
+    const statusesOf = (list) => list.map((b) => b.status).sort().join(',');
+    record(
+      'Current bookings holds every request the diary still carries',
+      statusesOf(groups.current) === 'cancelled,confirmed,pending,rejected',
+      statusesOf(groups.current),
+    );
+    record(
+      'Booking history is the whole record, including the served one',
+      statusesOf(groups.history) === 'cancelled,completed,confirmed,pending,rejected',
+      statusesOf(groups.history),
+    );
+    record(
+      '…so the two overlap on purpose, and only “completed” leaves Current',
+      groups.history.length === 5 && groups.current.length === 4 && !groups.current.some((b) => b.status === 'completed'),
+    );
+    record(
+      '…and every row is one of this account’s own bookings',
+      groups.history.length === panelBookings.length
+        && groups.history.every((b) => panelBookings.includes(b.id)),
+      `${groups.history.length} of ${panelBookings.length}`,
+    );
+
+    const panelRes = stubRes(loaded);
+    panelLayer.route.stack[0].handle(stubReq(loaded, { panel: '1' }), panelRes, () => {});
+    record(
+      'the pop-up answers with a fragment, never a page',
+      panelRes.view === 'partials/account-panel' && !String(panelRes.body).includes('<!doctype'),
+      panelRes.view,
+    );
+    record(
+      '…marked as one, and never cached',
+      panelRes.headers['x-naina-panel'] === '1' && panelRes.headers['cache-control'] === 'no-store',
+    );
+    const fragmentStatuses = (chunk) => [...chunk.matchAll(/pill pill--([a-z]+)/g)].map((m) => m[1]).sort().join(',');
+    const [currentFrag, historyFrag] = String(panelRes.body).split('data-panel-list="history"');
+    record(
+      'the lists it renders are the two it promised',
+      fragmentStatuses(currentFrag) === 'cancelled,confirmed,pending,rejected'
+        && fragmentStatuses(historyFrag) === 'cancelled,completed,confirmed,pending,rejected',
+    );
+    record(
+      'a ticket link only appears where the booking can carry one',
+      (currentFrag.match(/Download ticket/g) || []).length === 1
+        && (historyFrag.match(/href="\/account\/ticket/g) || []).length === 2,
+    );
+    record(
+      '…and the panel ends on the sign-out form the site already has',
+      panelRes.body.includes('action="/auth/logout"'),
+    );
+
+    // The tick is the site’s existing verification rule, not a decoration.
+    record(
+      'an incomplete profile shows no verification tick',
+      !panelRes.body.includes('profile-tick') && profileLib.completeness(loaded).complete === false,
+      `${profileLib.completeness(loaded).percent}% · still to add ${profileLib.completeness(loaded).missing.join(', ')}`,
+    );
+    const whole = stubRes(loaded);
+    profilePostLayer.route.stack[0].handle(
+      stubReq(loaded, {
+        panel: '1',
+        session: {},
+        body: {
+          name: 'Panel Owner',
+          phone: '9439712994',
+          preferred_title: '',
+          notes: '',
+          age: '31',
+          address: 'Bagurai, near Lucky Mess',
+          block: 'Bhadrak Block',
+          photo_data: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
+        },
+      }),
+      whole,
+    );
+    const savedRow = users.findById(panelOwner.id);
+    panelFiles.push(path.join(config.root, 'public', savedRow.photo_path || 'none'));
+    record(
+      'saving through the pop-up writes the same columns the page writes',
+      savedRow.age === 31 && savedRow.block === 'Bhadrak Block' && Boolean(savedRow.photo_path),
+      `${savedRow.age} · ${savedRow.block} · ${savedRow.photo_path}`,
+    );
+    record(
+      '…answers with the rebuilt fragment, so nothing navigates away',
+      whole.view === 'partials/account-panel' && whole.redirectTo === null && whole.body.includes('role="status"'),
+    );
+    record(
+      '…shows the saved values back',
+      whole.body.includes('>31<') && whole.body.includes('Bhadrak Block'),
+    );
+    record(
+      'the verification tick appears once every rule is met, and not before',
+      whole.body.includes('profile-tick') && profileLib.completeness(savedRow).complete === true,
+      `${profileLib.completeness(savedRow).percent}%`,
+    );
+
+    const refused = stubRes(loaded);
+    profilePostLayer.route.stack[0].handle(
+      stubReq(loaded, { panel: '1', body: { name: 'Panel Owner', phone: '9439712994', age: '900', address: '', block: '' } }),
+      refused,
+    );
+    record(
+      'a value the page would reject is rejected here too, inline',
+      refused.statusCode === 400 && refused.view === 'partials/account-panel' && refused.body.includes('id="ap-age-error"'),
+      `${refused.statusCode}`,
+    );
+    record('…and nothing was written', users.findById(panelOwner.id).age === 31);
+
+    const classic = stubRes(loaded);
+    profilePostLayer.route.stack[0].handle(
+      stubReq(loaded, { body: { name: 'Panel Owner', phone: '9439712994', age: '29', address: 'Bagurai', block: 'Bhadrak Block' } }),
+      classic,
+    );
+    record(
+      'the same form without the pop-up header still redirects, so no-JS is untouched',
+      classic.view === null && classic.redirectTo === '/account' && users.findById(panelOwner.id).age === 29,
+      `${classic.redirectTo}`,
+    );
+
+    const editor = stubRes(loaded);
+    panelLayer.route.stack[0].handle(stubReq(loaded, { panel: '1', query: { edit: 'profile' } }), editor);
+    record(
+      '“Edit profile” opens the shared editor with its own ids',
+      editor.body.includes('id="ap-name"') && !editor.body.includes('id="name"') && editor.body.includes('action="/account/profile"'),
+    );
+    const photoEditor = stubRes(loaded);
+    panelLayer.route.stack[0].handle(stubReq(loaded, { panel: '1', query: { edit: 'photo' } }), photoEditor);
+    record(
+      '“Edit photo” shows only the picker, but carries the stored details along',
+      photoEditor.body.includes('name="photo_data"') && !photoEditor.body.includes('id="ap-name"')
+        && photoEditor.body.includes('name="block"'),
+    );
+
+    // Who may ask. The route sits behind the router-wide guard, and the guard is
+    // the same one every other account screen uses.
+    const gateAt = account.stack.findIndex((layer) => layer.handle === guards.requireUser);
+    const panelAt = account.stack.findIndex((layer) => layer.route && layer.route.path === '/panel');
+    record(
+      'the pop-up route sits behind requireUser, enforced on the server',
+      gateAt === 0 && panelAt > gateAt,
+      `guard at ${gateAt}, panel at ${panelAt}`,
+    );
+    let anonymousReached = false;
+    let anonymousTo = null;
+    const anonymousRes = stubRes({ id: 0, role: 'customer' });
+    anonymousRes.redirect = (to) => {
+      anonymousTo = to;
+      return anonymousRes;
+    };
+    guards.requireUser(
+      { method: 'GET', originalUrl: '/account/panel', session: {}, accepts: () => 'html', get: () => undefined },
+      anonymousRes,
+      () => {
+        anonymousReached = true;
+      },
+    );
+    record(
+      'an anonymous request never reaches the data — it is sent to sign in',
+      anonymousReached === false && anonymousTo === '/auth/login',
+      `${anonymousTo}`,
+    );
+    const foreign = account.panelGroups(users.findById(panelOther.id));
+    record(
+      'another signed-in account’s panel holds none of these rows',
+      foreign.current.length === 0 && foreign.history.length === 0,
+    );
+    const foreignRender = stubRes(users.findById(panelOther.id));
+    panelLayer.route.stack[0].handle(stubReq(users.findById(panelOther.id), { panel: '1' }), foreignRender);
+    record(
+      '…and says so with its own empty state, without leaking the owner',
+      foreignRender.body.includes('No current bookings') && !foreignRender.body.includes('Panel Owner'),
+    );
+  } catch (error) {
+    record('account pop-up suite ran', false, error.message);
+  } finally {
+    for (const id of panelBookings) db.run('DELETE FROM bookings WHERE id = ?', id);
+    for (const file of panelFiles) {
+      try {
+        fs.unlinkSync(file);
+      } catch {
+        /* never written, or already gone */
+      }
+    }
+    for (const id of [panelOwner.id, panelOther.id]) {
+      db.run("DELETE FROM sessions WHERE json_extract(sess, '$.userId') = ?", id);
+      db.run('DELETE FROM users WHERE id = ?', id);
+    }
+  }
+
   const after = db.get('SELECT COUNT(*) AS n FROM bookings').n;
   console.log(`\n  bookings left in the database after cleanup: ${after}`);
   db.closeDatabase();
