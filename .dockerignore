@@ -1,0 +1,23 @@
+# Never let the local machine's data ride along into an image.
+#
+# data/ holds the SQLite database — real customer names, phone numbers, addresses
+# and session rows — plus the development mail outbox. public/uploads and uploads
+# hold real faces and booking PDFs with names and phone numbers in them. Whatever
+# is on this laptop belongs on this laptop: a build context that carried any of it
+# would push it to a registry where it can be pulled back out years later.
+.git/
+.gitignore
+data/
+uploads/
+public/uploads/
+.env
+.env.*
+!.env.example
+npm-debug.log*
+*.log
+node_modules/
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+.qoder/

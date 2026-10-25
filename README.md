@@ -27,6 +27,8 @@ simulated.
 - [Booking tickets (PDF)](#booking-tickets-pdf)
 - [Staff portal (`/portal`)](#staff-portal-portal)
 - [Editing the catalogue, hours and booking rules](#editing-the-catalogue-hours-and-booking-rules)
+- [Where the customer's files live](#where-the-customers-files-live)
+- [Running it on a server](#running-it-on-a-server)
 - [Security notes](#security-notes)
 - [Accessibility and mobile behaviour](#accessibility-and-mobile-behaviour)
 - [Photography and the visual system](#photography-and-the-visual-system)
@@ -120,6 +122,7 @@ this repository.**
 | `SESSION_SECRET` | Signs session cookies. The app refuses to boot with `NODE_ENV=production` and no secret. |
 | `PUBLIC_APP_URL` | Absolute origin used to build password-reset links, so it must match what clients actually type. |
 | `DATABASE_FILE` | Path to the SQLite file (default `./data/naina.db`). Keep it off any publicly served directory. |
+| `UPLOADS_DIR` | Where booking PDFs and avatars are written (default `./uploads`). Only a host with separate persistent storage needs it; never point it inside `public/` — see [Where the customer's files live](#where-the-customers-files-live). |
 | `SMTP_HOST`/`SMTP_PORT`/`SMTP_USER`/`SMTP_PASS`/`MAIL_FROM` | Needed for the forgot-password flow to actually deliver a link. |
 | `COOKIE_SECURE=1`, `TRUST_PROXY=1` | Set both once the site is behind HTTPS and a reverse proxy. |
 
@@ -177,7 +180,7 @@ itself in the UI and in `GET /healthz`:
 | `npm run create-admin` | Interactive: create the first staff account, or promote an existing email to `admin`. |
 | `npm run slots:generate` | Materialises slot rows for the whole booking horizon (also happens lazily when a day is viewed). |
 | `npm run art:ticket` | Rebuilds the small derived copies of the studio's cut-outs that the ticket PDF and the page sprigs use — see [Photography](#photography-and-the-visual-system). |
-| `npm run check` | 83 assertions — booking integrity, the portal guard and the profile/booking gate inside a transaction that is always rolled back, then staff-account, site-detail and ticket checks on throwaway rows and PDFs it deletes — see [Verification](#verification). |
+| `npm run check` | 117 assertions — booking integrity, the portal guard and the profile/booking gate inside a transaction that is always rolled back, then staff-account, site-detail, ticket, pop-up and customer-file checks on throwaway rows, PDFs and one live HTTP server, all deleted afterwards — see [Verification](#verification). |
 
 ---
 
@@ -213,10 +216,13 @@ src/
     admin.js              /admin → 302 to the matching /portal page
 views/                    partials, auth/, pages/, portal/, errors/
 public/                   styles.css, portal.css, main.js, portal.js, favicon.svg, assets/
-public/uploads/avatars/   customer photos, created on first upload (gitignored)
-public/uploads/tickets/   one PDF per confirmed booking, created on confirmation (gitignored)
+uploads/avatars/          customer photos, created on first upload (gitignored)
+uploads/tickets/          one PDF per confirmed booking, created on confirmation (gitignored)
 scripts/                  migrate, seed, create-admin, generate-slots, ticket-art, check
 data/                     SQLite database + dev outbox (gitignored)
+Dockerfile                node:24, npm ci --omit=dev, runs as the node user
+.dockerignore             keeps data/, uploads/ and .env out of the image
+fly.toml                  Fly.io: one machine, /data volume, production env, /healthz
 ```
 
 ---
@@ -336,12 +342,13 @@ blanking the rest.
 data URL. Nothing about that is trusted: `src/lib/uploads.js` re-decodes it, checks
 the first bytes against the JPEG/PNG/WebP signatures (an SVG renamed to `.png`
 fails), caps it at 400 KB, and writes it under a generated name —
-`public/uploads/avatars/<user id>-<12 hex>.<ext>`. The row stores only the URL
+`uploads/avatars/<user id>-<12 hex>.<ext>`. The row stores only the URL
 path. Replacing or removing a photo deletes the old file, but only through
 `safeRelativePath()`, which accepts a single bare filename under `/uploads/avatars/`
 and refuses everything else, so no path from a form can delete an asset the studio
-supplied. `/public/uploads/` is gitignored: these are real faces tied to real
-accounts.
+supplied. `/uploads/` is gitignored: these are real faces tied to real
+accounts, and it sits **outside** `/public/` on purpose — see
+[Where the customer's files live](#where-the-customers-files-live).
 
 **The tick.** At 100% the bar disappears and a small blue circular tick sits by the
 photo. It means *the studio has everything it needs to hold a time* — the page says
@@ -428,11 +435,12 @@ the route, the view and the generator all read):
 - Staff are exempt from the profile gate but a ticket is still only ever the
   customer's own copy of their own booking.
 
-**Where the file lives.** `public/uploads/tickets/booking-<id>.pdf`, created on
+**Where the file lives.** `uploads/tickets/booking-<id>.pdf`, created on
 demand, one per booking, and `bookings.ticket_path` + `ticket_issued_at` remember
-it. That directory is inside `/public/uploads/`, which is gitignored wholesale: a
+it. That directory is outside `/public/`, and `/uploads/` is gitignored wholesale: a
 ticket carries a name, a phone number and a photo, so it is customer data, not
-source. Nothing to configure — no environment variable, no external service.
+source. Nothing to configure for a normal install — the folder is created on first
+use, and only a host with separate persistent storage needs `UPLOADS_DIR`.
 
 **Repeat downloads are the point.** `ensure()` only writes when the file is
 missing, so a ticket deleted from disk (a fresh checkout, a cleared cache, a
@@ -609,6 +617,124 @@ the slot).
 
 ---
 
+## Where the customer's files live
+
+Two kinds of file are written while the site is running: a booking's PDF ticket
+and a customer's avatar. Both go under `uploads/` at the project root — **not**
+under `public/`, which is what the static mount serves to anybody who asks:
+
+```
+uploads/tickets/booking-<id>.pdf     written when staff confirm a request
+uploads/avatars/<user id>-<12 hex>.<ext>   written when a customer sets a photo
+```
+
+The name is the whole reason. A ticket is `booking-3.pdf`, `booking-4.pdf`, and so
+on — trivially guessed — and inside each one is a name, a phone number, a time and
+often a face. If that folder sat where the browser could reach it by path, signing
+in would be a formality: the earlier pass of this code served
+`/uploads/tickets/booking-3.pdf` to an anonymous visitor with a `200`, while the
+guarded link next to it correctly answered `302`. So:
+
+- **Tickets** are streamed by `GET /account/ticket/:id`, which re-reads the
+  booking, checks it belongs to the signed-in account, and `res.download()`s the
+  bytes. Nothing under `uploads/tickets/` has a URL.
+- **Avatars** need a URL, because the header shows the customer's own photo. One
+  route serves them — `GET /uploads/avatars/:name` in `src/app.js` — and it only
+  ever opens the single file the signed-in account's `photo_path` already names. A
+  stranger's session, no session, or a `name` with `..` in it all get a bare `404`.
+- `absoluteFor()` in both `uploads.js` and `ticket.js` refuses any stored path that
+  is not one bare filename inside its own folder, so a damaged or crafted database
+  row cannot aim a read or a write anywhere else on disk.
+- `/uploads/` is gitignored, as is `/data/`. Neither belongs in the repository.
+
+The folders are created on first use, so a normal checkout needs no configuration.
+`UPLOADS_DIR` exists for the one case where the default is wrong: a container whose
+own filesystem is thrown away between deploys, where the variable points at mounted
+persistent storage instead. It is a deployment fact, not a secret.
+
+`npm run check` proves all of this against a live server — it writes a probe PDF
+into the tickets folder, confirms the file is really there, asks for it over HTTP
+with no session, and expects a `404`; then it hands the same avatar path to three
+different requests and expects the owner to be the only one served.
+
+---
+
+## Running it on a server
+
+This is a Node process, not a folder of files: every page is an EJS template
+rendered per request, sessions and bookings live in a SQLite file, and a ticket is
+drawn with `pdf-lib` when staff confirm one. There is **no build step and no static
+output to upload** — a host has to be able to run `npm start` and keep the process
+alive. Shared PHP hosting cannot do this at all: no Node runtime, no long-lived
+process, and no writable directory that survives a restart for a WAL-mode SQLite
+file.
+
+`Dockerfile`, `.dockerignore` and `fly.toml` are set up for
+[Fly.io](https://fly.io), which builds the image on its own builder — so this works
+from a machine with no Docker installed. The four commands that took the site
+live, in order:
+
+```bash
+fly auth login                  # approves in the browser; no token to copy around
+fly apps create naina-beauty-parlour
+fly volume create naina_data -a naina-beauty-parlour -s 1 --region sin -y
+fly secrets set SESSION_SECRET="$(node -e 'console.log(require("crypto").randomBytes(48).toString("hex"))')"
+fly deploy
+```
+
+`.dockerignore` is what keeps the laptop's data on the laptop: `data/` (the SQLite
+file, with real names, phone numbers and session rows), `uploads/`, `.env` and
+`node_modules/` are all excluded from the build context, so none of it can end up in
+an image layer in a registry.
+
+`fly.toml` carries the rest: `NODE_ENV=production`, `COOKIE_SECURE=1`,
+`TRUST_PROXY=1`, `PORT=3000` matching the app's internal port, and both
+`DATABASE_FILE` and `UPLOADS_DIR` pointed into the mounted volume so customers,
+bookings and tickets survive the next deploy. Nothing else is a plain environment
+variable — `SESSION_SECRET` stays a secret, and `SMTP_*` / `TURNSTILE_*` are set the
+same way when those integrations are wanted:
+
+```bash
+fly secrets set SMTP_HOST=… SMTP_USER=… SMTP_PASS=… MAIL_FROM="… <no-reply@…>"
+fly secrets set TURNSTILE_SITE_KEY=… TURNSTILE_SECRET_KEY=…
+```
+
+`fly open` gets to the site. `fly ssh console -a <app> -u node -C "<command>"` runs
+one command inside it as the same user the app runs as — note `-C`, not `-c` (`-c` is
+the config file), and that the command is passed straight through without a shell, so
+it is one program and its arguments, not a pipeline. A fresh volume holds no database
+at all, so the first boot migrates **and seeds** the catalogue, the seven weekday
+rows and the booking settings; `server.js` does that on purpose, because a container
+that comes up against an empty disk would otherwise render a beautiful site with
+nothing bookable on it. `seed()` skips every row that already exists, so a restart
+never rolls back a staff edit. The one thing boot cannot do is invent the studio's
+own login, so the first staff account is made interactively:
+
+```bash
+fly ssh console -a naina-beauty-parlour -u node
+npm run create-admin        # asks for email, name and password; do not reuse a customer's
+```
+
+Two things to know before pointing a real domain at it. Fly has **no India region**,
+so `sin` (Singapore) is the closest machine to Bhadrak — the salon's own clock is
+unaffected, because every appointment time is stored as wall-clock on
+`SALON_TIMEZONE=Asia/Kolkata`, which is what makes `10:30` mean 10:30 in Bhadrak.
+And the machine sleeps when nothing is hitting it (`auto_stop_machines = 'stop'`,
+`min_machines_running = 0`), which costs nothing while idle but makes the first
+visitor after a quiet spell wait a second or two; set `min_machines_running = 1` to
+trade a small monthly charge for that never happening. The app has no HTTPS-redirect
+logic of its own — Fly terminates TLS at its edge and forwards `X-Forwarded-Proto`,
+which is exactly what `TRUST_PROXY=1` and `COOKIE_SECURE=1` are for. Without them the
+site would think it is plain HTTP: cookies stop being `Secure` and password-reset
+links are built as `http://`.
+
+Backups are one file plus one folder on the volume: `naina.db` (and its `-wal`) and
+`uploads/`. Fly takes scheduled snapshots of a volume (5 retained by default); for a
+copy you can hold, pull both database files together, or checkpoint first —
+a bare copy of the main `.db` while writes are still in `-wal` misses them.
+
+---
+
 ## Security notes
 
 - **Server-side only** for authentication, CAPTCHA, CSRF, validation, rate
@@ -655,9 +781,11 @@ the slot).
 - **Profile details** — age, address, Block and photo are held in the `users` row
   and the avatars directory, shown to that customer and to staff; no public page,
   search result or `/api/*` route reads them, and the account page is behind
-  `requireUser`. `/public/uploads/` is gitignored because those files are real
-  faces tied to real accounts, and `safeRelativePath()` means a form can only
-  ever point at a filename this server wrote in that directory.
+  `requireUser`. `/uploads/` is gitignored and lives outside `/public/` because those
+  files are real faces, names and phone numbers tied to real accounts;
+  `safeRelativePath()` means a form can only ever point at a filename this server
+  wrote in that directory, and no file under it is reachable over HTTP without
+  signing in — see [Where the customer's files live](#where-the-customers-files-live).
 - **Errors** — 5xx responses carry a generic sentence; the stack trace goes to
   the server log only.
 
@@ -962,8 +1090,18 @@ PASS  asking twice serves the same file instead of rewriting it
 PASS  a file deleted from disk is regenerated, so the link never dies
 PASS  a booking taken back after confirming stops offering its ticket — not-confirmed
 PASS  the ticket font survives the rupee, the dash and the ellipsis — Rs.1,200 - 3:30 pm - 5:00 pm . "bridal" ...
-83/83 checks passed.
+PASS  the files live outside the folder the web server serves — …/uploads
+PASS  …and the probe ticket really is on disk
+PASS  nobody can download a booking PDF by its filename — 404 text/html; charset=utf-8
+PASS  a signed-in customer’s photo is not readable without signing in — 404
+PASS  the owner is handed their own photo, and only that file
+PASS  another signed-in account cannot read it
+PASS  …not even by slipping a path into the filename
+PASS  …while the site’s own CSS and pictures still serve — 200 text/css; charset=UTF-8
+117/117 checks passed.
 ```
+
+(The pop-up group in between is abbreviated here; `npm run check` prints all of it.)
 
 The portal was then driven over **real HTTP** against the running server — every
 page and every mutating form — to confirm what an in-process test cannot: that
@@ -1039,3 +1177,23 @@ becomes a scrollable strip), every `input`, `select` and
 `footer` landmarks and a skip link, table headers carry `scope`, every tap target
 clears WCAG 2.5.8 (the smallest control measured was 30 px tall), and each status
 pill is paired with its word rather than relying on colour alone.
+
+The deployed container was checked the same way, against the live host rather than
+localhost. `/healthz` answers `{"ok":true,"database":true,"captcha":"local-image",
+"mail":"none","env":"production"}`; `/`, `/services`, `/studio`, `/location`,
+`/how-to-book`, `/auth/login` and `/auth/register` render, `/book` and `/account`
+redirect to sign-in, and `/portal` answers **403** to an anonymous request rather
+than a redirect — the guard is enforced before a handler, not by hiding a link.
+`/api/availability` returns real generated times for a three-day-forward date. The
+session cookie arrives `HttpOnly; Secure; SameSite=Lax`, HSTS is set, the CSP header
+is the app's own, and no page carries an inline script. The files that used to be
+reachable are not: `/uploads/tickets/booking-3.pdf`, `/uploads/avatars/<a real
+filename from the local database>` and a bare `/uploads/` directory each answer 404,
+while `/styles.css` and the illustrative artwork still serve `200`. The rendered
+pages contain no `₹` or `Rs` amount anywhere and every generated image carries its
+**Illustrative** label (36 of them on the home page). Inside the machine, the
+database and its `-wal` sit on the mounted volume rather than the image, and the
+`node` user the app runs as can write into `UPLOADS_DIR`. One fresh-volume boot was
+tested on a throwaway `DATABASE_FILE`: migrate, then seed — 8 categories, 39
+services, 7 weekday rows, 5 settings — and the availability API answered on the
+first request, with no manual `db:setup`.

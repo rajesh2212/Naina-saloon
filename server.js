@@ -3,6 +3,7 @@
 const { config, describeConfig } = require('./src/config');
 const db = require('./src/db');
 const { migrate } = require('./src/db/migrate');
+const { seed } = require('./src/db/seed');
 const studio = require('./src/lib/settings');
 const { createApp } = require('./src/app');
 
@@ -23,6 +24,19 @@ function banner() {
 function main() {
   const applied = migrate({ log: (line) => console.log(`  migration ${line}`) });
   if (applied.length) console.log(`  ${applied.length} migration(s) applied`);
+
+  // A deployed container starts against a volume that has never held a database,
+  // and a site with no catalogue is worse than one that took a second longer to
+  // boot. seed() only ever writes a row that is missing, so a studio's own edits
+  // in /portal are never overwritten by a restart.
+  const seeded = seed({ log: () => {} });
+  const added = seeded.settings + seeded.hours + seeded.catalogue.categories + seeded.catalogue.services;
+  if (added) {
+    console.log(
+      `  seeded        : ${seeded.catalogue.categories} categories, ${seeded.catalogue.services} services, ` +
+        `${seeded.hours} weekday rows, ${seeded.settings} settings (existing rows left untouched)`,
+    );
+  }
 
   // Business details saved in the staff portal win over SALON_* in .env.
   const saved = studio.savedDetailKeys();

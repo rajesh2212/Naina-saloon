@@ -1,0 +1,75 @@
+# Naina Beauty Parlour — Fly.io
+#
+# The app is a long-lived Node process with a SQLite file and a folder of customer
+# PDFs behind it, so the two things this file has to get right are (1) send every
+# request to the one machine that owns /data, and (2) tell the app it is behind a
+# proxy that already terminated TLS, or its session cookies and reset links come
+# out wrong.
+#
+# Secrets are NOT here. SESSION_SECRET (and SMTP_* / TURNSTILE_SECRET_KEY when
+# those are configured) are set with `fly secrets set`, so they never sit in the
+# image, in the build log, or in this repository.
+
+app = 'naina-beauty-parlour'
+# Fly has no India region; Singapore is the closest to Bhadrak, and the studio's
+# own clock is set separately by SALON_TIMEZONE below.
+primary_region = 'sin'
+
+[build]
+
+[env]
+  NODE_ENV = 'production'
+  # Must match [http_service].internal_port; the app reads PORT from the
+  # environment and binds HOST, so 0.0.0.0 is what Fly's proxy can reach.
+  PORT = '3000'
+  HOST = '0.0.0.0'
+  # Fly terminates TLS at its edge and forwards X-Forwarded-Proto. Without these
+  # two the site thinks it is plain HTTP: cookies stop being Secure and
+  # password-reset links are built as http://.
+  TRUST_PROXY = '1'
+  COOKIE_SECURE = '1'
+  # The address customers actually open. Used for reset links and for the
+  # redirect-back guard in the rate limiter.
+  PUBLIC_APP_URL = 'https://naina-beauty-parlour.fly.dev'
+  # The diary, the tickets and the avatars live on the volume, not in the image.
+  DATABASE_FILE = '/data/naina.db'
+  UPLOADS_DIR = '/data/uploads'
+  # Wall-clock zone every appointment time is written on. Overridable later from
+  # /portal/settings without a deploy.
+  SALON_TIMEZONE = 'Asia/Kolkata'
+  # Never write reset mail to a folder on a public host.
+  MAIL_DEV_OUTBOX = 'off'
+  CAPTCHA_MAX_ATTEMPTS = '3'
+
+[[mounts]]
+  source = 'naina_data'
+  destination = '/data'
+
+[http_service]
+  internal_port = 3000
+  force_https = true
+  auto_stop_machines = 'stop'
+  auto_start_machines = true
+  # Left at 0 so an idle studio costs nothing; the first visitor after a quiet
+  # spell waits a second or two for the machine to wake. Set to 1 to make that
+  # never happen.
+  min_machines_running = 0
+  processes = ['app']
+
+  [http_service.concurrency]
+    type = 'connections'
+    hard_limit = 100
+    soft_limit = 75
+
+  # /healthz answers 503 when the database cannot be read, so a deploy that
+  # booted but cannot open its volume never stays in the rotation.
+  [[http_service.checks]]
+    grace_period = '25s'
+    interval = '30s'
+    timeout = '5s'
+    method = 'GET'
+    path = '/healthz'
+
+[[vm]]
+  size = 'shared-cpu-1x'
+  memory = '512mb'
