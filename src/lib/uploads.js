@@ -14,7 +14,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { config } = require('../config');
 
-const AVATAR_DIR = path.join(config.root, 'public', 'uploads', 'avatars');
+const AVATAR_DIR = path.join(config.uploads.dir, 'avatars');
 const URL_PREFIX = '/uploads/avatars';
 const MAX_BYTES = 400 * 1024;
 // base64 is 4 characters per 3 bytes, plus slack for the data-URL prefix.
@@ -82,14 +82,23 @@ function saveAvatar(userId, value, previousPath = null) {
 }
 
 /**
+ * Resolve a stored photo URL to its file on disk. Returns null for anything this
+ * module did not write, so no caller has to re-derive the folder layout — and a
+ * damaged row can never point a read outside the avatars directory.
+ */
+function absoluteFor(photoPath) {
+  const relative = safeRelativePath(photoPath);
+  return relative ? path.join(AVATAR_DIR, path.basename(relative)) : null;
+}
+
+/**
  * Delete a stored avatar, but only when the path is one this module wrote.
  * Anything else — a stray edit, a path traversal, an asset the studio supplied
  * — is left alone.
  */
 function removeAvatar(photoPath) {
-  const relative = safeRelativePath(photoPath);
-  if (!relative) return false;
-  const file = path.join(config.root, 'public', relative);
+  const file = absoluteFor(photoPath);
+  if (!file) return false;
   if (!fs.existsSync(file)) return false;
   try {
     fs.unlinkSync(file);
@@ -117,4 +126,5 @@ module.exports = {
   saveAvatar,
   removeAvatar,
   safeRelativePath,
+  absoluteFor,
 };

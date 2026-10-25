@@ -319,7 +319,9 @@ router.post(
  * that belongs to somebody else, and a request the studio has not accepted. A
  * pending request has no ticket to show, so there is no page that could offer
  * one. The file itself is made on demand by src/lib/ticket.js and kept in
- * public/uploads/tickets, so the same link works on every visit afterwards.
+ * uploads/tickets — outside the folder the static mount serves, so this route is
+ * the only way a ticket reaches a browser, and the same link works on every visit
+ * afterwards.
  */
 router.get(
   '/ticket/:id(\\d+)',

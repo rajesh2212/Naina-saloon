@@ -5,8 +5,13 @@
 *.db-wal
 *.db-shm
 
-# Customer avatars uploaded through /account/profile. These are real faces tied
-# to real accounts, so they stay on the server that took them.
+# Booking PDF tickets and customer avatars. Outside public/ on purpose — the
+# static mount serves public/ to anyone who asks, and a ticket is named
+# `booking-<id>.pdf`. These are real faces, names and phone numbers tied to real
+# accounts, so they stay on the server that took them.
+/uploads/
+# Kept so an old checkout can never put customer files back where the static
+# mount would serve them.
 /public/uploads/
 
 # Local secrets

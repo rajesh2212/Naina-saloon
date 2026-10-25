@@ -17,6 +17,7 @@ const studio = require('./lib/settings');
 const catalogue = require('./lib/catalogue');
 const dates = require('./lib/dates');
 const users = require('./lib/users');
+const uploads = require('./lib/uploads');
 
 const publicRoutes = require('./routes/public');
 const authRoutes = require('./routes/auth');
@@ -175,6 +176,24 @@ function createApp() {
   });
 
   app.use(csrfMiddleware());
+
+  // A customer's own photo. Its bytes sit outside public/, so the static mount
+  // above cannot hand them to anyone; this is the only door, and it opens on one
+  // file — the avatar the signed-in account actually owns. A ticket PDF needs no
+  // route here, because /account/ticket/<id> already streams it.
+  app.get('/uploads/avatars/:name', (req, res) => {
+    const wanted = `${uploads.URL_PREFIX}/${req.params.name}`;
+    const user = res.locals.currentUser;
+    const stored = user ? uploads.safeRelativePath(user.photo_path) : null;
+    const file = stored === wanted ? uploads.absoluteFor(stored) : null;
+    if (!file) {
+      res.status(404).end();
+      return;
+    }
+    res.sendFile(file, (error) => {
+      if (error && !res.headersSent) res.status(404).end();
+    });
+  });
 
   // CAPTCHA image for the built-in provider.
   app.get('/captcha.svg', (req, res) => {

@@ -847,7 +847,7 @@ try {
       whole,
     );
     const savedRow = users.findById(panelOwner.id);
-    panelFiles.push(path.join(config.root, 'public', savedRow.photo_path || 'none'));
+    panelFiles.push(uploads.absoluteFor(savedRow.photo_path));
     record(
       'saving through the pop-up writes the same columns the page writes',
       savedRow.age === 31 && savedRow.block === 'Bhadrak Block' && Boolean(savedRow.photo_path),
@@ -957,6 +957,131 @@ try {
     for (const id of [panelOwner.id, panelOther.id]) {
       db.run("DELETE FROM sessions WHERE json_extract(sess, '$.userId') = ?", id);
       db.run('DELETE FROM users WHERE id = ?', id);
+    }
+  }
+
+  // --------------------------------------- the files the app writes for people
+  // Ticket PDFs are named booking-<id>.pdf and avatars are somebody's face, so the
+  // one rule worth pinning here is that the web server cannot be talked into
+  // handing either of them out. These ask a real running app over real HTTP, with
+  // no session at all — which is exactly the request that used to succeed.
+  console.log('\nCustomer files over HTTP (throwaway rows, files and one port)');
+  const { createApp } = require('../src/app');
+  const probeFiles = [];
+  const probeUsers = [];
+  const servedSids = new Set(db.all('SELECT sid FROM sessions').map((row) => row.sid));
+  let uploadServer = null;
+  try {
+    const uploadOwner = makeUser(`uploads-owner-${Date.now()}@example.test`, 'Uploads Owner');
+    const uploadOther = makeUser(`uploads-other-${Date.now()}@example.test`, 'Uploads Other');
+    probeUsers.push(uploadOwner.id, uploadOther.id);
+
+    const tinyPng = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
+    const savedPhoto = uploads.saveAvatar(uploadOwner.id, tinyPng, null);
+    const photoFile = uploads.absoluteFor(savedPhoto.path);
+    probeFiles.push(photoFile);
+    db.run('UPDATE users SET photo_path = ? WHERE id = ?', savedPhoto.path, uploadOwner.id);
+    const photoName = savedPhoto.path.slice(uploads.URL_PREFIX.length + 1);
+
+    fs.mkdirSync(ticket.TICKET_DIR, { recursive: true });
+    const probeTicket = path.join(ticket.TICKET_DIR, 'booking-999999.pdf');
+    fs.writeFileSync(probeTicket, Buffer.from('%PDF-1.4 probe\n%%EOF'));
+    probeFiles.push(probeTicket);
+
+    const app = createApp();
+    uploadServer = await new Promise((resolve) => {
+      const server = app.listen(0, '127.0.0.1', () => resolve(server));
+    });
+    const origin = `http://127.0.0.1:${uploadServer.address().port}`;
+    const ask = async (url) => {
+      const response = await fetch(`${origin}${url}`);
+      return { status: response.status, type: response.headers.get('content-type') || '' };
+    };
+
+    record(
+      'the files live outside the folder the web server serves',
+      !config.uploads.dir.startsWith(`${path.join(config.root, 'public')}${path.sep}`),
+      config.uploads.dir,
+    );
+    record('…and the probe ticket really is on disk', fs.existsSync(probeTicket));
+    const ticketAnswer = await ask(`/uploads/tickets/${path.basename(probeTicket)}`);
+    record(
+      'nobody can download a booking PDF by its filename',
+      ticketAnswer.status === 404,
+      `${ticketAnswer.status} ${ticketAnswer.type}`,
+    );
+    record('…nor can the folder be listed', (await ask('/uploads/tickets/')).status === 404);
+    record('…and the old location under public/ is gone for good', !fs.existsSync(path.join(config.root, 'public', 'uploads')));
+
+    const anonymousAvatar = await ask(`${uploads.URL_PREFIX}/${photoName}`);
+    record(
+      'a signed-in customer’s photo is not readable without signing in',
+      anonymousAvatar.status === 404 && fs.existsSync(photoFile),
+      `${anonymousAvatar.status} ${anonymousAvatar.type}`,
+    );
+    const strangerName = await ask(`${uploads.URL_PREFIX}/0-deadbeefdeadbeef.jpg`);
+    record('…and a name that is not in the database gives nothing away', strangerName.status === 404);
+
+    /** The same handler the app mounted, run against a res that says what it served. */
+    const routes = app._router || app.router;
+    const avatarLayer = routes.stack.find(
+      (layer) => layer.route && layer.route.path === `${uploads.URL_PREFIX}/:name`,
+    );
+    function openDoor(user, name) {
+      const served = { file: null, status: null };
+      const res = {
+        locals: { currentUser: user },
+        status(code) {
+          served.status = code;
+          return this;
+        },
+        end() {
+          return this;
+        },
+        sendFile(file, done) {
+          served.file = file;
+          if (done) done(null);
+          return this;
+        },
+      };
+      avatarLayer.route.stack[0].handle({ params: { name }, path: `${uploads.URL_PREFIX}/${name}` }, res, () => {});
+      return served;
+    }
+
+    record(
+      'the owner is handed their own photo, and only that file',
+      openDoor(users.findById(uploadOwner.id), photoName).file === photoFile,
+    );
+    record(
+      'another signed-in account cannot read it',
+      openDoor(users.findById(uploadOther.id), photoName).file === null,
+    );
+    record(
+      '…not even by slipping a path into the filename',
+      ['../tickets/booking-999999.pdf', '..', photoName + '?x=1', ''].every(
+        (trick) => openDoor(users.findById(uploadOwner.id), trick).file === null,
+      ),
+    );
+
+    const sheet = await ask('/styles.css');
+    record('…while the site’s own CSS and pictures still serve', sheet.status === 200, `${sheet.status} ${sheet.type}`);
+  } catch (error) {
+    record('customer file suite ran', false, error.message);
+  } finally {
+    if (uploadServer) await new Promise((resolve) => uploadServer.close(resolve));
+    for (const file of probeFiles) {
+      try {
+        fs.unlinkSync(file);
+      } catch {
+        /* never written, or already gone */
+      }
+    }
+    for (const id of probeUsers) {
+      db.run("DELETE FROM sessions WHERE json_extract(sess, '$.userId') = ?", id);
+      db.run('DELETE FROM users WHERE id = ?', id);
+    }
+    for (const row of db.all('SELECT sid FROM sessions')) {
+      if (!servedSids.has(row.sid)) db.run('DELETE FROM sessions WHERE sid = ?', row.sid);
     }
   }
 

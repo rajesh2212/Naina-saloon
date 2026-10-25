@@ -68,6 +68,14 @@ const config = {
 
   db: { file: dbFile, dir: path.dirname(dbFile) },
 
+  // Where the files the app writes for real people live: each confirmed
+  // booking's PDF ticket and every customer avatar. This is deliberately NOT
+  // under public/, because public/ is what the static mount serves to anyone who
+  // asks — a ticket filename is `booking-<id>.pdf`, so a guessable name next to
+  // somebody's name and phone number is a leak. The bytes sit here instead and
+  // reach a browser only through a route that checks who is asking.
+  uploads: { dir: path.resolve(ROOT, str(env.UPLOADS_DIR, './uploads')) },
+
   session: {
     secret: str(env.SESSION_SECRET),
     cookieSecure: bool(env.COOKIE_SECURE, isProd),

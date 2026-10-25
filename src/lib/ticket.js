@@ -4,7 +4,7 @@
  *
  * A ticket exists only for a booking the studio has set to Confirmed, and it is
  * built from the live row every time — nothing about a customer or a time is
- * baked into this file. The PDF is written once to public/uploads/tickets and
+ * baked into this file. The PDF is written once to uploads/tickets and
  * kept there so the same document can be downloaded again later; if that file
  * ever goes missing (a fresh clone, a wiped disk) `ensure()` rebuilds it from
  * the booking in front of it, so a download cannot dead-end.
@@ -22,7 +22,7 @@ const db = require('../db');
 const dates = require('./dates');
 const uploads = require('./uploads');
 
-const TICKET_DIR = path.join(config.root, 'public', 'uploads', 'tickets');
+const TICKET_DIR = path.join(config.uploads.dir, 'tickets');
 const URL_PREFIX = '/uploads/tickets';
 const ART_DIR = path.join(config.root, 'public', 'assets', 'art');
 
@@ -83,8 +83,17 @@ function ticketRow(bookingId) {
   );
 }
 
+/**
+ * Resolve a stored `ticket_path` to a file on disk. Only a bare filename under
+ * the tickets folder is allowed through, so a damaged or crafted row cannot
+ * point the writer somewhere else in the filesystem.
+ */
 function absoluteFor(urlPath) {
-  return urlPath ? path.join(config.root, 'public', urlPath.replace(/^\//, '')) : null;
+  const value = String(urlPath ?? '');
+  if (!value.startsWith(`${URL_PREFIX}/`)) return null;
+  const name = value.slice(URL_PREFIX.length + 1);
+  if (!name || name !== path.basename(name) || name.includes('..')) return null;
+  return path.join(TICKET_DIR, name);
 }
 
 async function art(doc, name) {
@@ -296,19 +305,20 @@ async function ensure(bookingId) {
   if (!booking) return { ok: false, reason: 'not-found' };
   if (!TICKET_STATUSES.includes(booking.status)) return { ok: false, reason: 'not-confirmed', booking };
 
-  const urlPath = booking.ticket_path || `${URL_PREFIX}/booking-${booking.id}.pdf`;
-  const file = absoluteFor(urlPath);
-  if (!fs.existsSync(file)) {
+  const file = absoluteFor(booking.ticket_path);
+  const urlPath = file ? booking.ticket_path : `${URL_PREFIX}/booking-${booking.id}.pdf`;
+  const target = absoluteFor(urlPath);
+  if (!fs.existsSync(target)) {
     const bytes = await renderTicket(booking);
     fs.mkdirSync(TICKET_DIR, { recursive: true });
-    fs.writeFileSync(file, bytes, { mode: 0o644 });
+    fs.writeFileSync(target, bytes, { mode: 0o644 });
     db.run(
       "UPDATE bookings SET ticket_path = ?, ticket_issued_at = COALESCE(ticket_issued_at, datetime('now')), updated_at = datetime('now') WHERE id = ?",
       urlPath,
       booking.id,
     );
   }
-  return { ok: true, booking: ticketRow(bookingId), file, urlPath };
+  return { ok: true, booking: ticketRow(bookingId), file: target, urlPath };
 }
 
 /** Called by the portal when staff confirm a request. */

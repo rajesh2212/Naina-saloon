@@ -5,7 +5,8 @@ const { hashPassword, verifyPassword } = require('./password');
 const { normalizeEmail, normalizeText, normalizePhone, normalizeMultiline } = require('./validate');
 const profile = require('./profile');
 
-// `photo_path` is only ever a path under public/uploads/avatars; the image bytes
+// `photo_path` is only ever a path under uploads/avatars, outside the folder the
+// static mount serves; the image bytes
 // stay on disk. Every screen that lists accounts reads through this column list,
 // so a password hash can never ride along to the browser by accident.
 const PUBLIC_COLUMNS =

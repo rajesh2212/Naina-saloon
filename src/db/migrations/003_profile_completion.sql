@@ -8,8 +8,9 @@
 -- serves — the exact spellings are the ones shown in the dropdown, and a value
 -- outside the list is refused by the database as well as by the form.
 --
--- `photo_path` is only ever a path inside public/uploads/avatars, written by
--- src/lib/uploads.js. The image bytes stay on disk; the row holds where they are.
+-- `photo_path` is only ever a path inside uploads/avatars — outside public/, so
+-- the static mount cannot serve it — written by src/lib/uploads.js. The image
+-- bytes stay on disk; the row holds where they are.
 
 ALTER TABLE users ADD COLUMN age INTEGER CHECK (age IS NULL OR (age BETWEEN 1 AND 120));
 ALTER TABLE users ADD COLUMN address TEXT;

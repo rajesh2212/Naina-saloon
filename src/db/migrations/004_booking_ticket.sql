@@ -1,6 +1,7 @@
 -- 004_booking_ticket.sql
 -- Where a confirmed booking's ticket PDF lives. The file itself is written to
--- public/uploads/tickets (gitignored, like the customer avatars); the row only
+-- uploads/tickets — outside public/, so the static mount cannot hand it out, and
+-- gitignored like the customer avatars; the row only
 -- ever holds the URL path plus the moment it was issued, so a download can be
 -- answered from storage and re-made from live data if the disk was ever wiped.
 --
