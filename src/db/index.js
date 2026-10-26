@@ -18,16 +18,37 @@ types.setTypeParser(20, (value) => (value === null ? null : Number(value)));
 
 let pool = null;
 
+/**
+ * TLS is decided here, not by the query string. `sslmode` is read for the one
+ * thing it still has to mean — `disable`, for a database on a laptop that speaks
+ * plain TCP — and then dropped from the string, because `pg` treats `require`,
+ * `prefer` and `verify-ca` as aliases for `verify-full` and prints a security
+ * warning over each of them every time a function instance starts.
+ */
+function splitTls(connectionString) {
+  const ssl = /sslmode=disable\b/.test(connectionString) ? false : { rejectUnauthorized: false };
+  try {
+    const url = new URL(connectionString);
+    url.searchParams.delete('sslmode');
+    return { url: url.toString(), ssl };
+  } catch {
+    // A space-separated DSN (`host=… dbname=…`) is pg's format, not the URL
+    // parser's, so the parameter comes off it by hand.
+    return { url: connectionString.replace(/sslmode=\w+\s*/g, '').trim(), ssl };
+  }
+}
+
 function getPool() {
   if (!pool) {
     if (!config.db.url) {
       throw new Error('DATABASE_URL (or POSTGRES_URL) is not set — the app has nowhere to keep bookings.');
     }
+    const tls = splitTls(config.db.url);
     pool = new Pool({
-      connectionString: config.db.url,
+      connectionString: tls.url,
       // Neon and most hosted Postgres terminate with a private CA; the
       // connection string decides whether SSL is on, not this app.
-      ssl: /sslmode=disable/.test(config.db.url) ? false : { rejectUnauthorized: false },
+      ssl: tls.ssl,
       // A serverless instance starts with no warm connections, and the boot
       // read fires six queries at once (one per salon detail). A pool smaller
       // than that makes the last one wait out the whole cold start of a
