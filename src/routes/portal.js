@@ -10,13 +10,13 @@
  * open a single booking record. Nothing here trusts a browser-side role.
  *
  * Data is live: bookings, customers, hours and the studio clock all come from
- * the same SQLite database the public booking flow writes to.
+ * the same Postgres database the public booking flow writes to.
  */
 const express = require('express');
 const path = require('node:path');
 const fs = require('node:fs');
 
-const { config } = require('../config');
+const { config, databaseLabel } = require('../config');
 const db = require('../db');
 const dates = require('../lib/dates');
 const studio = require('../lib/settings');
@@ -30,6 +30,10 @@ const { flash } = require('../lib/flash');
 const { requireAdmin } = require('../lib/guards');
 
 const router = express.Router();
+
+// Same text timestamp shape every other writer in the app uses, so lib/dates can
+// read a staff edit back unchanged.
+const NOW = "to_char(now(), 'YYYY-MM-DD HH24:MI:SS')";
 
 const NAV = [
   { href: '/portal', label: 'Dashboard' },
@@ -54,24 +58,37 @@ const STATUS_LABELS = {
  * control; this is the only thing standing between a customer session and the
  * diary of every other client.
  */
-router.use((req, res, next) => {
-  requireAdmin(req, res, () => {
+router.use(
+  wrap(async (req, res, next) => {
+    let admitted = false;
+    await requireAdmin(req, res, () => {
+      admitted = true;
+    });
+    // requireAdmin answered the request itself — a 403 for a customer session.
+    if (!admitted) return undefined;
     res.locals.portalNav = NAV;
     res.locals.portalZone = dates.zoneLabel();
     res.locals.portalZoneTag = dates.zoneTag();
     res.locals.portalClock = dates.salonClock();
-    res.locals.portalStatusCounts = records.statusCounts();
+    res.locals.portalStatusCounts = await records.statusCounts();
     res.locals.portalCssVersion = portalAssetVersion();
-    next();
-  });
-});
+    return next();
+  }),
+);
 
+// Read once per process: on a hosted deploy the stylesheet's mtime cannot change
+// while the app runs, and a file the function cannot see must not hand the
+// browser a new cache-busting query on every page.
+let cssVersion = null;
 function portalAssetVersion() {
-  try {
-    return String(Math.floor(fs.statSync(path.join(config.root, 'public', 'portal.css')).mtimeMs));
-  } catch {
-    return String(Date.now());
+  if (cssVersion === null) {
+    try {
+      cssVersion = String(Math.floor(fs.statSync(path.join(config.root, 'public', 'portal.css')).mtimeMs));
+    } catch {
+      cssVersion = String(Date.now());
+    }
   }
+  return cssVersion;
 }
 
 /** Only ever redirect back into the portal, and never through a control character. */
@@ -87,18 +104,18 @@ function page(value) {
 }
 
 // ---------------------------------------------------------------- dashboard
-router.get('/', (req, res) => {
+router.get('/', wrap(async (req, res) => {
   return res.render('portal/dashboard', {
     title: 'Dashboard',
     view: 'dashboard',
-    snap: records.dashboardSnapshot(),
+    snap: await records.dashboardSnapshot(),
     day: dates.salonClock().date,
   });
-});
+}));
 
 // ----------------------------------------------------------------- bookings
-router.get('/bookings', (req, res) => {
-  const result = records.searchBookings({
+router.get('/bookings', wrap(async (req, res) => {
+  const result = await records.searchBookings({
     term: req.query.q,
     status: req.query.status,
     from: req.query.from,
@@ -112,24 +129,27 @@ router.get('/bookings', (req, res) => {
     result,
     statuses: records.STATUSES,
   });
-});
+}));
 
-router.get('/bookings/:id(\\d+)', (req, res) => {
-  const booking = records.bookingForStaff(req.params.id);
-  if (!booking) {
-    res.status(404);
-    return res.render('portal/not-found', { title: 'No such booking', view: 'bookings', back: '/portal/bookings' });
-  }
-  const account = records.customerForStaff(booking.user_id);
-  return res.render('portal/booking', {
-    title: `Booking #${booking.id}`,
-    view: 'bookings',
-    booking,
-    statuses: records.STATUSES,
-    account,
-    history: account ? account.bookings.filter((row) => row.id !== booking.id) : [],
-  });
-});
+router.get(
+  '/bookings/:id(\\d+)',
+  wrap(async (req, res) => {
+    const booking = await records.bookingForStaff(req.params.id);
+    if (!booking) {
+      res.status(404);
+      return res.render('portal/not-found', { title: 'No such booking', view: 'bookings', back: '/portal/bookings' });
+    }
+    const account = await records.customerForStaff(booking.user_id);
+    return res.render('portal/booking', {
+      title: `Booking #${booking.id}`,
+      view: 'bookings',
+      booking,
+      statuses: records.STATUSES,
+      account,
+      history: account ? account.bookings.filter((row) => row.id !== booking.id) : [],
+    });
+  }),
+);
 
 router.post('/bookings/:id(\\d+)/status', wrap(async (req, res) => {
   const back = safeBack(req.body.back, '/portal/bookings');
@@ -139,7 +159,7 @@ router.post('/bookings/:id(\\d+)/status', wrap(async (req, res) => {
     return res.redirect(back);
   }
   try {
-    const booking = slots.setBookingStatus({
+    const booking = await slots.setBookingStatus({
       bookingId: Number(req.params.id),
       status,
       staffNote: v.normalizeMultiline(req.body.staff_note, 500) || null,
@@ -171,125 +191,150 @@ router.post('/bookings/:id(\\d+)/status', wrap(async (req, res) => {
 }));
 
 // ---------------------------------------------------------------- customers
-router.get('/customers', (req, res) => {
-  const result = records.searchCustomers({
-    term: req.query.q,
-    filter: req.query.filter,
-    sort: req.query.sort,
-    page: page(req.query.page),
-  });
-  return res.render('portal/customers', { title: 'Customers', view: 'customers', result });
-});
+router.get(
+  '/customers',
+  wrap(async (req, res) => {
+    const result = await records.searchCustomers({
+      term: req.query.q,
+      filter: req.query.filter,
+      sort: req.query.sort,
+      page: page(req.query.page),
+    });
+    return res.render('portal/customers', { title: 'Customers', view: 'customers', result });
+  }),
+);
 
-router.get('/customers/:id(\\d+)', (req, res) => {
-  const customer = records.customerForStaff(req.params.id);
-  if (!customer) {
-    res.status(404);
-    return res.render('portal/not-found', { title: 'No such account', view: 'customers', back: '/portal/customers' });
-  }
-  return res.render('portal/customer', { title: customer.name, view: 'customers', customer });
-});
+router.get(
+  '/customers/:id(\\d+)',
+  wrap(async (req, res) => {
+    const customer = await records.customerForStaff(req.params.id);
+    if (!customer) {
+      res.status(404);
+      return res.render('portal/not-found', { title: 'No such account', view: 'customers', back: '/portal/customers' });
+    }
+    return res.render('portal/customer', { title: customer.name, view: 'customers', customer });
+  }),
+);
 
 // ---------------------------------------------------------------- day sheet
-router.get('/day/:date', (req, res) => {
-  const date = String(req.params.date);
-  if (!dates.isValidDate(date)) return res.redirect('/portal');
-  const prepared = slots.ensureDateSlots(date, { force: true });
-  const hours = studio.dayHours(dates.weekdayOf(date));
-  return res.render('portal/day', {
-    title: 'Day sheet',
-    view: 'day',
-    date,
-    hours,
-    closed: prepared.closed || !hours || hours.closed,
-    rows: records.dayRows(date),
-    agenda: slots.dayBookings(date).map(records.decorate),
-    statuses: records.STATUSES,
-    week: dates.addDays(date, -3),
-  });
-});
+router.get(
+  '/day/:date',
+  wrap(async (req, res) => {
+    const date = String(req.params.date);
+    if (!dates.isValidDate(date)) return res.redirect('/portal');
+    const prepared = await slots.ensureDateSlots(date, { force: true });
+    const hours = await studio.dayHours(dates.weekdayOf(date));
+    return res.render('portal/day', {
+      title: 'Day sheet',
+      view: 'day',
+      date,
+      hours,
+      closed: prepared.closed || !hours || hours.closed,
+      rows: await records.dayRows(date),
+      agenda: (await slots.dayBookings(date)).map(records.decorate),
+      statuses: records.STATUSES,
+      week: dates.addDays(date, -3),
+    });
+  }),
+);
 
-router.post('/day/:date(\\d{4}-\\d{2}-\\d{2})/slot', (req, res) => {
-  const date = String(req.params.date);
-  const time = String(req.body.start_time || '');
-  const blocked = req.body.action === 'block';
-  try {
-    slots.blockSlot({ date, time, blocked, reason: v.normalizeText(req.body.reason, 120) });
-    flash.success(
-      req,
-      `${dates.formatTime12(time)} on ${dates.formatLongDate(date)} is now ${blocked ? 'blocked — customers cannot pick it' : 'open again'}.`,
-    );
-  } catch (error) {
-    const expected = error.status && error.status < 500;
-    flash.error(req, expected ? error.message : 'Could not change that time. Nothing was blocked.');
-  }
-  return res.redirect(safeBack(req.body.back, `/portal/day/${date}`));
-});
+router.post(
+  '/day/:date(\\d{4}-\\d{2}-\\d{2})/slot',
+  wrap(async (req, res) => {
+    const date = String(req.params.date);
+    const time = String(req.body.start_time || '');
+    const blocked = req.body.action === 'block';
+    try {
+      await slots.blockSlot({ date, time, blocked, reason: v.normalizeText(req.body.reason, 120) });
+      flash.success(
+        req,
+        `${dates.formatTime12(time)} on ${dates.formatLongDate(date)} is now ${blocked ? 'blocked — customers cannot pick it' : 'open again'}.`,
+      );
+    } catch (error) {
+      const expected = error.status && error.status < 500;
+      flash.error(req, expected ? error.message : 'Could not change that time. Nothing was blocked.');
+    }
+    return res.redirect(safeBack(req.body.back, `/portal/day/${date}`));
+  }),
+);
 
 // ----------------------------------------------------------------- services
-router.get('/services', (req, res) => {
-  return res.render('portal/services', {
-    title: 'Services',
-    view: 'services',
-    groups: records.serviceBoard(),
-    rules: studio.bookingRules(),
-  });
-});
+router.get(
+  '/services',
+  wrap(async (req, res) => {
+    const [groups, rules] = await Promise.all([records.serviceBoard(), studio.bookingRules()]);
+    return res.render('portal/services', {
+      title: 'Services',
+      view: 'services',
+      groups,
+      rules,
+    });
+  }),
+);
 
-router.post('/services/:id(\\d+)/toggle', (req, res) => {
-  const id = Number(req.params.id);
-  const row = db.get('SELECT id, is_active, name FROM services WHERE id = ?', id);
-  if (row) {
-    db.run("UPDATE services SET is_active = 1 - is_active, updated_at = datetime('now') WHERE id = ?", id);
-    flash.success(req, `“${row.name}” is now ${row.is_active ? 'hidden from the website' : 'listed on the website'}.`);
-  } else {
-    flash.error(req, 'That service no longer exists.');
-  }
-  return res.redirect('/portal/services');
-});
-
-router.post('/services/:id(\\d+)', (req, res) => {
-  const id = Number(req.params.id);
-  if (!db.get('SELECT id FROM services WHERE id = ?', id)) {
-    flash.error(req, 'That service no longer exists.');
+router.post(
+  '/services/:id(\\d+)/toggle',
+  wrap(async (req, res) => {
+    const id = Number(req.params.id);
+    const row = await db.get('SELECT id, is_active, name FROM services WHERE id = ?', id);
+    if (row) {
+      await db.run(`UPDATE services SET is_active = 1 - is_active, updated_at = ${NOW} WHERE id = ?`, id);
+      flash.success(req, `“${row.name}” is now ${row.is_active ? 'hidden from the website' : 'listed on the website'}.`);
+    } else {
+      flash.error(req, 'That service no longer exists.');
+    }
     return res.redirect('/portal/services');
-  }
-  const errors = [v.nameError(req.body.name)];
-  const minutes = Number(req.body.duration_minutes);
-  if (!Number.isInteger(minutes) || minutes < 15 || minutes > 480) {
-    errors.push('Chair time has to be a whole number of minutes between 15 and 480.');
-  }
-  const problems = errors.filter(Boolean);
-  if (problems.length) {
-    flash.error(req, problems.join(' '));
-    return res.redirect('/portal/services');
-  }
-  db.run(
-    `UPDATE services
-     SET name = ?, description = ?, duration_minutes = ?, price_text = ?, is_bookable = ?, updated_at = datetime('now')
-     WHERE id = ?`,
-    v.normalizeText(req.body.name, 80),
-    v.normalizeMultiline(req.body.description, 400) || null,
-    minutes,
-    v.normalizeText(req.body.price_text, 60) || null,
-    req.body.is_bookable ? 1 : 0,
-    id,
-  );
-  flash.success(req, `“${v.normalizeText(req.body.name, 80)}” saved.`);
-  return res.redirect('/portal/services');
-});
+  }),
+);
 
-router.post('/categories/:id(\\d+)/toggle', (req, res) => {
-  const id = Number(req.params.id);
-  const row = db.get('SELECT id, is_active, name FROM service_categories WHERE id = ?', id);
-  if (row) {
-    db.run('UPDATE service_categories SET is_active = 1 - is_active WHERE id = ?', id);
-    flash.success(req, `“${row.name}” is now ${row.is_active ? 'hidden' : 'shown'} on the website.`);
-  } else {
-    flash.error(req, 'That group no longer exists.');
-  }
-  return res.redirect('/portal/services');
-});
+router.post(
+  '/services/:id(\\d+)',
+  wrap(async (req, res) => {
+    const id = Number(req.params.id);
+    if (!(await db.get('SELECT id FROM services WHERE id = ?', id))) {
+      flash.error(req, 'That service no longer exists.');
+      return res.redirect('/portal/services');
+    }
+    const errors = [v.nameError(req.body.name)];
+    const minutes = Number(req.body.duration_minutes);
+    if (!Number.isInteger(minutes) || minutes < 15 || minutes > 480) {
+      errors.push('Chair time has to be a whole number of minutes between 15 and 480.');
+    }
+    const problems = errors.filter(Boolean);
+    if (problems.length) {
+      flash.error(req, problems.join(' '));
+      return res.redirect('/portal/services');
+    }
+    await db.run(
+      `UPDATE services
+       SET name = ?, description = ?, duration_minutes = ?, price_text = ?, is_bookable = ?, updated_at = ${NOW}
+       WHERE id = ?`,
+      v.normalizeText(req.body.name, 80),
+      v.normalizeMultiline(req.body.description, 400) || null,
+      minutes,
+      v.normalizeText(req.body.price_text, 60) || null,
+      req.body.is_bookable ? 1 : 0,
+      id,
+    );
+    flash.success(req, `“${v.normalizeText(req.body.name, 80)}” saved.`);
+    return res.redirect('/portal/services');
+  }),
+);
+
+router.post(
+  '/categories/:id(\\d+)/toggle',
+  wrap(async (req, res) => {
+    const id = Number(req.params.id);
+    const row = await db.get('SELECT id, is_active, name FROM service_categories WHERE id = ?', id);
+    if (row) {
+      await db.run('UPDATE service_categories SET is_active = 1 - is_active WHERE id = ?', id);
+      flash.success(req, `“${row.name}” is now ${row.is_active ? 'hidden' : 'shown'} on the website.`);
+    } else {
+      flash.error(req, 'That group no longer exists.');
+    }
+    return res.redirect('/portal/services');
+  }),
+);
 
 // --------------------------------------------------------- hours and clocks
 /**
@@ -304,87 +349,103 @@ const RULE_FIELDS = [
   { key: 'max_active_bookings_per_user', valueKey: 'maxActivePerUser', label: 'Open bookings per account', hint: 'Stops one person holding several slots.' },
 ].map((field) => ({ ...field, min: studio.HARD_LIMITS[field.key][0], max: studio.HARD_LIMITS[field.key][1] }));
 
-router.get('/settings', (req, res) => {
-  const rules = studio.bookingRules();
-  return res.render('portal/settings', {
-    title: 'Hours & settings',
-    view: 'settings',
-    week: studio.allWeekHours().map((row) => ({ ...row, label: dates.WEEKDAY_LABELS[row.weekday] })),
-    rules,
-    zone: {
-      current: studio.timeZone(),
-      saved: studio.hasSavedTimeZone(),
-      tag: dates.zoneTag(),
-      offset: dates.zoneOffset(),
-      abbreviation: dates.zoneAbbreviation(),
-      presets: studio.timeZonePresets(),
-      envDefault: config.salon.timezone,
-      clock: dates.salonClock(),
-      utcNow: `${new Date().toISOString().slice(0, 16).replace('T', ' ')} UTC`,
-    },
-    ruleFields: RULE_FIELDS.map((field) => ({ ...field, value: rules[field.valueKey] })),
-  });
-});
-
-router.post('/settings/timezone', (req, res) => {
-  const wanted = v.normalizeText(req.body.time_zone, 64);
-  try {
-    studio.saveTimeZone(wanted);
-    flash.success(req, `The salon clock now runs on ${wanted} — ${dates.zoneTag()}. Every time in the portal and on the website is read on it.`);
-  } catch (error) {
-    flash.error(req, `${error.message} “${wanted || '(empty)'}” was not saved; the clock is still ${studio.timeZone()}.`);
-  }
-  return res.redirect('/portal/settings');
-});
-
-router.post('/settings/rules', (req, res) => {
-  const rejected = [];
-  for (const field of RULE_FIELDS) {
-    if (req.body[field.key] === undefined) continue;
-    const text = String(req.body[field.key]).trim();
-    if (!/^\d+$/.test(text)) {
-      rejected.push(`${field.label} — “${text || '(blank)'}” is not a whole number`);
-      continue;
-    }
-    const parsed = Number.parseInt(text, 10);
-    if (parsed < field.min || parsed > field.max) {
-      rejected.push(`${field.label} — use ${field.min} to ${field.max}`);
-      continue;
-    }
-    studio.setSetting(field.key, parsed);
-  }
-  if (rejected.length) {
-    flash.error(req, `Left alone because they are out of range: ${rejected.join('; ')}.`);
-  } else {
-    const rules = studio.bookingRules();
-    flash.success(
-      req,
-      `Booking rules saved: slots every ${rules.stepMinutes} min, ` +
-        `${rules.horizonDays} days ahead, ${rules.leadMinutes} min notice.`,
-    );
-  }
-  return res.redirect('/portal/settings');
-});
-
-router.post('/settings/hours', (req, res) => {
-  const weekday = Number(req.body.weekday);
-  if (!Number.isInteger(weekday) || weekday < 0 || weekday > 6) {
-    flash.error(req, 'That day of the week is not on the calendar.');
-    return res.redirect('/portal/settings');
-  }
-  try {
-    studio.saveWeekHours(weekday, {
-      isClosed: req.body.is_closed === '1',
-      opensAt: v.normalizeText(req.body.opens_at, 5),
-      closesAt: v.normalizeText(req.body.closes_at, 5),
-      note: v.normalizeText(req.body.note, 120),
+router.get(
+  '/settings',
+  wrap(async (req, res) => {
+    const [rules, week, savedZone] = await Promise.all([
+      studio.bookingRules(),
+      studio.allWeekHours(),
+      studio.hasSavedTimeZone(),
+    ]);
+    return res.render('portal/settings', {
+      title: 'Hours & settings',
+      view: 'settings',
+      week: week.map((row) => ({ ...row, label: dates.WEEKDAY_LABELS[row.weekday] })),
+      rules,
+      zone: {
+        current: studio.timeZone(),
+        saved: savedZone,
+        tag: dates.zoneTag(),
+        offset: dates.zoneOffset(),
+        abbreviation: dates.zoneAbbreviation(),
+        presets: studio.timeZonePresets(),
+        envDefault: config.salon.timezone,
+        clock: dates.salonClock(),
+        utcNow: `${new Date().toISOString().slice(0, 16).replace('T', ' ')} UTC`,
+      },
+      ruleFields: RULE_FIELDS.map((field) => ({ ...field, value: rules[field.valueKey] })),
     });
-    flash.success(req, `${dates.WEEKDAY_LABELS[weekday]} timings saved. New bookings follow them from now on.`);
-  } catch (error) {
-    flash.error(req, `${error.message} ${dates.WEEKDAY_LABELS[weekday]} was left as it was.`);
-  }
-  return res.redirect('/portal/settings');
-});
+  }),
+);
+
+router.post(
+  '/settings/timezone',
+  wrap(async (req, res) => {
+    const wanted = v.normalizeText(req.body.time_zone, 64);
+    try {
+      await studio.saveTimeZone(wanted);
+      flash.success(req, `The salon clock now runs on ${wanted} — ${dates.zoneTag()}. Every time in the portal and on the website is read on it.`);
+    } catch (error) {
+      flash.error(req, `${error.message} “${wanted || '(empty)'}” was not saved; the clock is still ${studio.timeZone()}.`);
+    }
+    return res.redirect('/portal/settings');
+  }),
+);
+
+router.post(
+  '/settings/rules',
+  wrap(async (req, res) => {
+    const rejected = [];
+    for (const field of RULE_FIELDS) {
+      if (req.body[field.key] === undefined) continue;
+      const text = String(req.body[field.key]).trim();
+      if (!/^\d+$/.test(text)) {
+        rejected.push(`${field.label} — “${text || '(blank)'}” is not a whole number`);
+        continue;
+      }
+      const parsed = Number.parseInt(text, 10);
+      if (parsed < field.min || parsed > field.max) {
+        rejected.push(`${field.label} — use ${field.min} to ${field.max}`);
+        continue;
+      }
+      await studio.setSetting(field.key, parsed);
+    }
+    if (rejected.length) {
+      flash.error(req, `Left alone because they are out of range: ${rejected.join('; ')}.`);
+    } else {
+      const rules = await studio.bookingRules();
+      flash.success(
+        req,
+        `Booking rules saved: slots every ${rules.stepMinutes} min, ` +
+          `${rules.horizonDays} days ahead, ${rules.leadMinutes} min notice.`,
+      );
+    }
+    return res.redirect('/portal/settings');
+  }),
+);
+
+router.post(
+  '/settings/hours',
+  wrap(async (req, res) => {
+    const weekday = Number(req.body.weekday);
+    if (!Number.isInteger(weekday) || weekday < 0 || weekday > 6) {
+      flash.error(req, 'That day of the week is not on the calendar.');
+      return res.redirect('/portal/settings');
+    }
+    try {
+      await studio.saveWeekHours(weekday, {
+        isClosed: req.body.is_closed === '1',
+        opensAt: v.normalizeText(req.body.opens_at, 5),
+        closesAt: v.normalizeText(req.body.closes_at, 5),
+        note: v.normalizeText(req.body.note, 120),
+      });
+      flash.success(req, `${dates.WEEKDAY_LABELS[weekday]} timings saved. New bookings follow them from now on.`);
+    } catch (error) {
+      flash.error(req, `${error.message} ${dates.WEEKDAY_LABELS[weekday]} was left as it was.`);
+    }
+    return res.redirect('/portal/settings');
+  }),
+);
 
 // -------------------------------------------------------------- site details
 /**
@@ -396,29 +457,33 @@ router.post('/settings/hours', (req, res) => {
  * password typed into a web page ends up inside a database file that gets
  * copied and backed up, so those stay in the environment.
  */
-router.get('/details', (req, res) => {
-  const saved = studio.savedDetailKeys();
-  const current = studio.salonDetails();
-  return res.render('portal/details', {
-    title: 'Site details',
-    view: 'details',
-    fields: studio.DETAIL_FIELDS.map((field) => ({
-      ...field,
-      envName: field.key.toUpperCase(),
-      envValue: studio.baseDetail(field.field),
-      value: current[field.field],
-      saved: saved.has(field.key),
-    })),
-    wiring: {
-      sessionSecret: config.session.secret ? 'set from .env' : 'not set — using the development fallback',
-      smtp: config.mail.host ? `host ${config.mail.host}` : 'no SMTP_HOST in .env',
-      publicUrl: config.http.publicUrl,
-      databaseFile: config.db.file,
-    },
-  });
-});
+router.get(
+  '/details',
+  wrap(async (req, res) => {
+    const [saved, current] = await Promise.all([studio.savedDetailKeys(), studio.salonDetails()]);
+    return res.render('portal/details', {
+      title: 'Site details',
+      view: 'details',
+      fields: studio.DETAIL_FIELDS.map((field) => ({
+        ...field,
+        envName: field.key.toUpperCase(),
+        envValue: studio.baseDetail(field.field),
+        value: current[field.field],
+        saved: saved.has(field.key),
+      })),
+      wiring: {
+        sessionSecret: config.session.secret ? 'set from .env' : 'not set — using the development fallback',
+        smtp: config.mail.host ? `host ${config.mail.host}` : 'no SMTP_HOST in .env',
+        publicUrl: config.http.publicUrl,
+        database: databaseLabel(config.db.url),
+      },
+    });
+  }),
+);
 
-router.post('/details', (req, res) => {
+router.post(
+  '/details',
+  wrap(async (req, res) => {
   const problems = [];
   const values = {};
 
@@ -460,12 +525,12 @@ router.post('/details', (req, res) => {
     values[field.key] = v.normalizeText(text, field.max);
   }
 
-  const written = studio.saveSalonDetails(values);
+  const written = await studio.saveSalonDetails(values);
   if (!written.length) {
     flash.error(req, problems.length ? `Nothing was saved. ${problems.join(' ')}` : 'Nothing changed — every box already held that value.');
     return res.redirect('/portal/details');
   }
-  const now = studio.salonDetails();
+  const now = await studio.salonDetails();
   flash.success(
     req,
     `Saved ${written.join(', ')}. The header now reads “${now.name}”, the call button dials ${now.phone},` +
@@ -473,7 +538,8 @@ router.post('/details', (req, res) => {
       (problems.length ? `Left as they were: ${problems.join(' ')}` : ''),
   );
   return res.redirect('/portal/details');
-});
+  }),
+);
 
 // -------------------------------------------------------------- staff logins
 /**
@@ -483,25 +549,29 @@ router.post('/details', (req, res) => {
  * outsider can walk up to — but the studio no longer needs shell access to hand
  * the diary to a second person.
  */
-router.get('/staff', (req, res) => {
-  const staff = users.listStaff().map((row) => ({
-    ...row,
-    joinedLabel: dates.formatStamp(row.created_at),
-    signedInLabel: row.last_login_at ? dates.formatStamp(row.last_login_at) : null,
-    signedInIso: row.last_login_at ? dates.stampToIso(row.last_login_at) : null,
-  }));
-  return res.render('portal/staff', {
-    title: 'Staff logins',
-    view: 'staff',
-    staff,
-    accountTotal: users.count(),
-    activeAdmins: users.countAdmins(),
-    selfId: res.locals.currentUser ? res.locals.currentUser.id : null,
-  });
-});
+router.get(
+  '/staff',
+  wrap(async (req, res) => {
+    const [rows, accountTotal, activeAdmins] = await Promise.all([users.listStaff(), users.count(), users.countAdmins()]);
+    const staff = rows.map((row) => ({
+      ...row,
+      joinedLabel: dates.formatStamp(row.created_at),
+      signedInLabel: row.last_login_at ? dates.formatStamp(row.last_login_at) : null,
+      signedInIso: row.last_login_at ? dates.stampToIso(row.last_login_at) : null,
+    }));
+    return res.render('portal/staff', {
+      title: 'Staff logins',
+      view: 'staff',
+      staff,
+      accountTotal,
+      activeAdmins,
+      selfId: res.locals.currentUser ? res.locals.currentUser.id : null,
+    });
+  }),
+);
 
-function staffOrNull(req, res, id) {
-  const target = users.findById(id);
+async function staffOrNull(req, res, id) {
+  const target = await users.findById(id);
   if (!target || target.role !== 'admin') {
     flash.error(req, 'There is no staff login with that number. It may have been removed.');
     return null;
@@ -510,152 +580,164 @@ function staffOrNull(req, res, id) {
 }
 
 /** True when removing this account's access would leave the portal shut for everyone. */
-function isLastActiveAdmin(target) {
-  return target.role === 'admin' && target.is_active && users.countAdmins() <= 1;
+async function isLastActiveAdmin(target) {
+  return target.role === 'admin' && target.is_active && (await users.countAdmins()) <= 1;
 }
 
-router.post('/staff', async (req, res, next) => {
-  const email = v.normalizeEmail(req.body.email);
-  const name = v.normalizeText(req.body.name, 80) || 'Salon team';
-  const password = String(req.body.password || '');
+router.post(
+  '/staff',
+  wrap(async (req, res, next) => {
+    const email = v.normalizeEmail(req.body.email);
+    const name = v.normalizeText(req.body.name, 80) || 'Salon team';
+    const password = String(req.body.password || '');
 
-  const problems = [];
-  if (!email) problems.push('Enter the email address this person will sign in with.');
-  else if (v.emailError(email)) problems.push(v.emailError(email));
-  if (password) {
-    const error = v.passwordError(password, { email, name });
-    if (error) problems.push(`The staff password — ${error}`);
-  }
-  if (problems.length) {
-    flash.error(req, problems.join(' '));
+    const problems = [];
+    if (!email) problems.push('Enter the email address this person will sign in with.');
+    else if (v.emailError(email)) problems.push(v.emailError(email));
+    if (password) {
+      const error = v.passwordError(password, { email, name });
+      if (error) problems.push(`The staff password — ${error}`);
+    }
+    if (problems.length) {
+      flash.error(req, problems.join(' '));
+      return res.redirect('/portal/staff');
+    }
+
+    const self = res.locals.currentUser;
+    const existing = email ? await users.findByEmail(email) : null;
+
+    try {
+      if (existing && existing.role === 'admin') {
+        flash.info(req, `${email} is already a staff login. Nothing was changed.`);
+        return res.redirect('/portal/staff');
+      }
+
+      if (existing && !password) {
+        // Promote the account the way the terminal script does: the person keeps
+        // the password they already chose, so no secret is invented here.
+        const outcome = await users.promote(email, name, null);
+        flash.success(
+          req,
+          `${outcome.user.email} is now a staff login and still signs in with the password they already had. ` +
+            'Use “Set a new password” on their row if you wanted to change it.',
+        );
+        return res.redirect('/portal/staff');
+      }
+
+      if (existing && self && existing.id === self.id) {
+        flash.error(req, 'That is your own login. Change your password from your account page, not from here.');
+        return res.redirect('/portal/staff');
+      }
+
+      if (existing) {
+        await users.changePassword(existing.id, password);
+        const outcome = await users.promote(email, name, null);
+        flash.success(
+          req,
+          `${outcome.user.email} is a staff login with the new password set. Every other device signed in as them ` +
+            'was signed out, and their outstanding reset links were dropped.',
+        );
+        return res.redirect('/portal/staff');
+      }
+
+      if (!password) {
+        flash.error(req, `No account exists for ${email} yet, so the new staff login needs a password ` +
+          '— at least 10 characters, with a letter and a number.');
+        return res.redirect('/portal/staff');
+      }
+
+      const created = await users.createStaff({ email, name, password });
+      flash.success(
+        req,
+        `Staff login #${created.id} made for ${created.email}. They sign in at the same address as a customer ` +
+          'and the portal opens for them straight away.',
+      );
+      return res.redirect('/portal/staff');
+    } catch (error) {
+      if (error && error.status && error.status < 500) {
+        flash.error(req, error.message);
+        return res.redirect('/portal/staff');
+      }
+      return next(error);
+    }
+  }),
+);
+
+router.post(
+  '/staff/:id(\\d+)/password',
+  wrap(async (req, res, next) => {
+    const target = await staffOrNull(req, res, Number(req.params.id));
+    if (!target) return res.redirect('/portal/staff');
+    const self = res.locals.currentUser;
+    if (self && self.id === target.id) {
+      flash.error(req, 'That is your own login — change it from your account page so you stay signed in.');
+      return res.redirect('/portal/staff');
+    }
+    const password = String(req.body.password || '');
+    const error = v.passwordError(password, { email: target.email, name: target.name });
+    if (error) {
+      flash.error(req, `The password was not changed. ${error}`);
+      return res.redirect('/portal/staff');
+    }
+    try {
+      await users.changePassword(target.id, password);
+      flash.success(req, `A new password is set for ${target.email}. Hand it over and ask them to sign in again.`);
+    } catch (inner) {
+      return next(inner);
+    }
     return res.redirect('/portal/staff');
-  }
+  }),
+);
 
-  const self = res.locals.currentUser;
-  const existing = email ? users.findByEmail(email) : null;
+router.post(
+  '/staff/:id(\\d+)/active',
+  wrap(async (req, res) => {
+    const target = await staffOrNull(req, res, Number(req.params.id));
+    if (!target) return res.redirect('/portal/staff');
+    const self = res.locals.currentUser;
+    const turningOff = target.is_active === 1;
 
-  try {
-    if (existing && existing.role === 'admin') {
-      flash.info(req, `${email} is already a staff login. Nothing was changed.`);
+    if (turningOff && self && self.id === target.id) {
+      flash.error(req, 'You cannot deactivate the login you are using — that would close the portal on you mid-shift.');
+      return res.redirect('/portal/staff');
+    }
+    if (turningOff && (await isLastActiveAdmin(target))) {
+      flash.error(req, 'This is the last working staff login. Nobody would be left who can open the diary, so it stays active.');
       return res.redirect('/portal/staff');
     }
 
-    if (existing && !password) {
-      // Promote the account the way the terminal script does: the person keeps
-      // the password they already chose, so no secret is invented here.
-      const outcome = await users.promote(email, name, null);
-      flash.success(
-        req,
-        `${outcome.user.email} is now a staff login and still signs in with the password they already had. ` +
-          'Use “Set a new password” on their row if you wanted to change it.',
-      );
-      return res.redirect('/portal/staff');
-    }
-
-    if (existing && self && existing.id === self.id) {
-      flash.error(req, 'That is your own login. Change your password from your account page, not from here.');
-      return res.redirect('/portal/staff');
-    }
-
-    if (existing) {
-      await users.changePassword(existing.id, password);
-      const outcome = await users.promote(email, name, null);
-      flash.success(
-        req,
-        `${outcome.user.email} is a staff login with the new password set. Every other device signed in as them ` +
-          'was signed out, and their outstanding reset links were dropped.',
-      );
-      return res.redirect('/portal/staff');
-    }
-
-    if (!password) {
-      flash.error(req, `No account exists for ${email} yet, so the new staff login needs a password ` +
-        '— at least 10 characters, with a letter and a number.');
-      return res.redirect('/portal/staff');
-    }
-
-    const created = await users.createStaff({ email, name, password });
+    const updated = await users.setActive(target.id, !turningOff);
     flash.success(
       req,
-      `Staff login #${created.id} made for ${created.email}. They sign in at the same address as a customer ` +
-        'and the portal opens for them straight away.',
+      turningOff
+        ? `${updated.email} can no longer sign in, and the sessions they had open were dropped. Their bookings and account history stay in the diary.`
+        : `${updated.email} can sign in again as staff. They will need to log in afresh.`,
     );
     return res.redirect('/portal/staff');
-  } catch (error) {
-    if (error && error.status && error.status < 500) {
-      flash.error(req, error.message);
+  }),
+);
+
+router.post(
+  '/staff/:id(\\d+)/role',
+  wrap(async (req, res) => {
+    const target = await staffOrNull(req, res, Number(req.params.id));
+    if (!target) return res.redirect('/portal/staff');
+    const self = res.locals.currentUser;
+    if (self && self.id === target.id) {
+      flash.error(req, 'You cannot take your own staff role off — that would lock you out of this page.');
       return res.redirect('/portal/staff');
     }
-    return next(error);
-  }
-});
-
-router.post('/staff/:id(\\d+)/password', async (req, res, next) => {
-  const target = staffOrNull(req, res, Number(req.params.id));
-  if (!target) return res.redirect('/portal/staff');
-  const self = res.locals.currentUser;
-  if (self && self.id === target.id) {
-    flash.error(req, 'That is your own login — change it from your account page so you stay signed in.');
+    if (await isLastActiveAdmin(target)) {
+      flash.error(req, 'This is the last working staff login, so it cannot be turned back into a customer account.');
+      return res.redirect('/portal/staff');
+    }
+    const updated = await users.setRole(target.id, 'customer');
+    flash.success(
+      req,
+      `${updated.email} is a customer account again and was signed out of the portal. Their bookings are still in the diary.`,
+    );
     return res.redirect('/portal/staff');
-  }
-  const password = String(req.body.password || '');
-  const error = v.passwordError(password, { email: target.email, name: target.name });
-  if (error) {
-    flash.error(req, `The password was not changed. ${error}`);
-    return res.redirect('/portal/staff');
-  }
-  try {
-    await users.changePassword(target.id, password);
-    flash.success(req, `A new password is set for ${target.email}. Hand it over and ask them to sign in again.`);
-  } catch (inner) {
-    return next(inner);
-  }
-  return res.redirect('/portal/staff');
-});
-
-router.post('/staff/:id(\\d+)/active', (req, res) => {
-  const target = staffOrNull(req, res, Number(req.params.id));
-  if (!target) return res.redirect('/portal/staff');
-  const self = res.locals.currentUser;
-  const turningOff = target.is_active === 1;
-
-  if (turningOff && self && self.id === target.id) {
-    flash.error(req, 'You cannot deactivate the login you are using — that would close the portal on you mid-shift.');
-    return res.redirect('/portal/staff');
-  }
-  if (turningOff && isLastActiveAdmin(target)) {
-    flash.error(req, 'This is the last working staff login. Nobody would be left who can open the diary, so it stays active.');
-    return res.redirect('/portal/staff');
-  }
-
-  const updated = users.setActive(target.id, !turningOff);
-  flash.success(
-    req,
-    turningOff
-      ? `${updated.email} can no longer sign in, and the sessions they had open were dropped. Their bookings and account history stay in the diary.`
-      : `${updated.email} can sign in again as staff. They will need to log in afresh.`,
-  );
-  return res.redirect('/portal/staff');
-});
-
-router.post('/staff/:id(\\d+)/role', (req, res) => {
-  const target = staffOrNull(req, res, Number(req.params.id));
-  if (!target) return res.redirect('/portal/staff');
-  const self = res.locals.currentUser;
-  if (self && self.id === target.id) {
-    flash.error(req, 'You cannot take your own staff role off — that would lock you out of this page.');
-    return res.redirect('/portal/staff');
-  }
-  if (isLastActiveAdmin(target)) {
-    flash.error(req, 'This is the last working staff login, so it cannot be turned back into a customer account.');
-    return res.redirect('/portal/staff');
-  }
-  const updated = users.setRole(target.id, 'customer');
-  flash.success(
-    req,
-    `${updated.email} is a customer account again and was signed out of the portal. Their bookings are still in the diary.`,
-  );
-  return res.redirect('/portal/staff');
-});
+  }),
+);
 
 module.exports = router;

@@ -9,16 +9,18 @@
  * Asia/Kolkata, which is what the studio actually runs on.
  *
  * Changing the zone re-labels the diary, it does not move it: a 10:30 slot is
- * 10:30 on whatever clock is in force. Timestamps written by SQLite's
- * `datetime('now')` are UTC and are converted on the way out.
+ * 10:30 on whatever clock is in force. Timestamps written by the database are
+ * UTC text (`to_char(now(), …)`) and are converted on the way out.
  */
-const db = require('../db');
 const { config } = require('../config');
 
 const DEFAULT_ZONE = 'Asia/Kolkata';
 const ZONE_KEY = 'salon_timezone';
 
-let pinnedZone = null; // set by setSalonZone() so a write is live in this process
+// The zone in force for this process. `loadSalonZone()` fills it from the
+// database at boot and again after a save; until then the env default keeps
+// the clock working, which is what a fresh clone with an empty database gets.
+let pinnedZone = null;
 const formatters = {}; // zone -> built Intl formatters
 
 const WEEKDAY_LABELS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
@@ -41,15 +43,9 @@ function isValidTimeZone(value) {
   }
 }
 
-/** The zone in force. Reads the setting once per process unless it is pinned. */
+/** The zone in force — the pinned one, else `SALON_TIMEZONE`, else IST. */
 function salonZone() {
   if (pinnedZone) return pinnedZone;
-  try {
-    const row = db.get('SELECT value FROM settings WHERE key = ?', ZONE_KEY);
-    if (row && isValidTimeZone(row.value)) return row.value.trim();
-  } catch {
-    // The settings table may not exist yet on a fresh database.
-  }
   return isValidTimeZone(config.salon.timezone) ? config.salon.timezone : DEFAULT_ZONE;
 }
 
@@ -61,7 +57,7 @@ function setSalonZone(zone) {
   return value;
 }
 
-/** Drop the in-process pin so the next read goes back to the database. */
+/** Forget the pinned zone so the next read goes back to the environment default. */
 function reloadSalonZone() {
   pinnedZone = null;
 }

@@ -5,15 +5,22 @@ const { hashPassword, verifyPassword } = require('./password');
 const { normalizeEmail, normalizeText, normalizePhone, normalizeMultiline } = require('./validate');
 const profile = require('./profile');
 
-// `photo_path` is only ever a path under uploads/avatars, outside the folder the
-// static mount serves; the image bytes
-// stay on disk. Every screen that lists accounts reads through this column list,
-// so a password hash can never ride along to the browser by accident.
+const NOW = "to_char(now(), 'YYYY-MM-DD HH24:MI:SS')";
+
+// `photo_path` is only ever a key in the private uploads store, so the image
+// bytes are never under the folder the static mount serves. Every screen that
+// lists accounts reads through this column list, so a password hash can never
+// ride along to the browser by accident.
 const PUBLIC_COLUMNS =
   'id, email, name, phone, preferred_title, notes, age, address, block, photo_path, role, is_active, created_at, last_login_at';
 
+/** Sessions belong to a user through the JSON blob express-session stores. */
+function deleteUserSessions(id) {
+  return db.run("DELETE FROM sessions WHERE (sess->>'userId')::bigint = ?", id);
+}
+
 function findByEmail(email) {
-  return db.get('SELECT * FROM users WHERE email = ?', normalizeEmail(email));
+  return db.get('SELECT * FROM users WHERE LOWER(email) = LOWER(?)', normalizeEmail(email));
 }
 
 function findById(id) {
@@ -21,12 +28,12 @@ function findById(id) {
 }
 
 function findForAuth(email) {
-  return db.get('SELECT * FROM users WHERE email = ? AND is_active = 1', normalizeEmail(email));
+  return db.get('SELECT * FROM users WHERE LOWER(email) = LOWER(?) AND is_active = 1', normalizeEmail(email));
 }
 
 async function create({ email, name, password, phone = '', preferredTitle = '' }) {
   const digest = await hashPassword(password);
-  const result = db.run(
+  const result = await db.insert(
     `INSERT INTO users (email, name, phone, preferred_title, password_hash, role)
      VALUES (?, ?, ?, ?, ?, 'customer')`,
     normalizeEmail(email),
@@ -35,11 +42,11 @@ async function create({ email, name, password, phone = '', preferredTitle = '' }
     normalizeText(preferredTitle, 24) || null,
     digest,
   );
-  return findById(result.lastInsertRowid);
+  return findById(result.id);
 }
 
 async function verifyCredentials(email, password) {
-  const user = findForAuth(email);
+  const user = await findForAuth(email);
   if (!user) {
     // Hash a throwaway value so timing does not reveal unknown accounts.
     await verifyPassword(password || '', '$2b$12$invalidinvalidinvalidinvalidinvalidinvalidinvalidinvalidin');
@@ -54,17 +61,17 @@ async function verifyCredentials(email, password) {
  * is already stored, so a form that only posts part of the profile cannot
  * quietly blank the rest of it.
  */
-function updateProfile(id, values = {}) {
-  const user = findById(id);
+async function updateProfile(id, values = {}) {
+  const user = await findById(id);
   if (!user) return null;
   const kept = (key, incoming) => (incoming === undefined ? user[key] : incoming);
   const block = values.block === undefined
     ? user.block
     : (profile.isBlock(values.block) ? normalizeText(values.block, 40) : null);
 
-  db.run(
+  await db.run(
     `UPDATE users SET name = ?, phone = ?, preferred_title = ?, notes = ?, age = ?, address = ?, block = ?,
-             updated_at = datetime('now')
+             updated_at = ${NOW}
      WHERE id = ?`,
     kept('name', values.name === undefined ? undefined : normalizeText(values.name, 80)),
     kept('phone', values.phone === undefined ? undefined : normalizePhone(values.phone) || null),
@@ -78,33 +85,33 @@ function updateProfile(id, values = {}) {
   return findById(id);
 }
 
-/** Point the account at its avatar file, or clear the pointer when it is removed. */
-function setPhoto(id, photoPath) {
-  db.run("UPDATE users SET photo_path = ?, updated_at = datetime('now') WHERE id = ?", photoPath || null, id);
+/** Point the account at its avatar, or clear the pointer when it is removed. */
+async function setPhoto(id, photoPath) {
+  await db.run(`UPDATE users SET photo_path = ?, updated_at = ${NOW} WHERE id = ?`, photoPath || null, id);
   return findById(id);
 }
 
 async function changePassword(id, newPassword) {
   const digest = await hashPassword(newPassword);
-  db.run("UPDATE users SET password_hash = ?, updated_at = datetime('now') WHERE id = ?", digest, id);
+  await db.run(`UPDATE users SET password_hash = ?, updated_at = ${NOW} WHERE id = ?`, digest, id);
   // Invalidate every outstanding reset link for this account.
-  db.run('DELETE FROM password_resets WHERE user_id = ? AND used_at IS NULL', id);
+  await db.run('DELETE FROM password_resets WHERE user_id = ? AND used_at IS NULL', id);
   // …and every signed-in session, so an old device cannot keep working with the
   // password that has just been changed.
-  db.run("DELETE FROM sessions WHERE json_extract(sess, '$.userId') = ?", id);
+  await deleteUserSessions(id);
   return true;
 }
 
-function recordLogin(id) {
-  db.run("UPDATE users SET last_login_at = datetime('now') WHERE id = ?", id);
+async function recordLogin(id) {
+  await db.run(`UPDATE users SET last_login_at = ${NOW} WHERE id = ?`, id);
 }
 
-function count() {
-  return Number(db.get('SELECT COUNT(*) AS n FROM users').n || 0);
+async function count() {
+  return Number((await db.get('SELECT COUNT(*) AS n FROM users')).n || 0);
 }
 
-function countAdmins() {
-  return Number(db.get("SELECT COUNT(*) AS n FROM users WHERE role = 'admin' AND is_active = 1").n || 0);
+async function countAdmins() {
+  return Number((await db.get("SELECT COUNT(*) AS n FROM users WHERE role = 'admin' AND is_active = 1")).n || 0);
 }
 
 /**
@@ -120,19 +127,19 @@ function listStaff() {
  * that account's sessions, so a demoted staff member cannot keep a portal page
  * open on the session that was minted while they had the role.
  */
-function setRole(id, role) {
+async function setRole(id, role) {
   if (role !== 'admin' && role !== 'customer') throw new Error('The only roles are customer and admin.');
-  db.run("UPDATE users SET role = ?, updated_at = datetime('now') WHERE id = ?", role, id);
-  if (role !== 'admin') db.run("DELETE FROM sessions WHERE json_extract(sess, '$.userId') = ?", id);
+  await db.run(`UPDATE users SET role = ?, updated_at = ${NOW} WHERE id = ?`, role, id);
+  if (role !== 'admin') await deleteUserSessions(id);
   return findById(id);
 }
 
 /** Stop an account signing in — bookings and history stay intact. */
-function setActive(id, active) {
-  db.run("UPDATE users SET is_active = ?, updated_at = datetime('now') WHERE id = ?", active ? 1 : 0, id);
+async function setActive(id, active) {
+  await db.run(`UPDATE users SET is_active = ?, updated_at = ${NOW} WHERE id = ?`, active ? 1 : 0, id);
   if (!active) {
-    db.run('DELETE FROM password_resets WHERE user_id = ? AND used_at IS NULL', id);
-    db.run("DELETE FROM sessions WHERE json_extract(sess, '$.userId') = ?", id);
+    await db.run('DELETE FROM password_resets WHERE user_id = ? AND used_at IS NULL', id);
+    await deleteUserSessions(id);
   }
   return findById(id);
 }
@@ -144,16 +151,16 @@ async function createStaff({ email, name, password }) {
 }
 
 async function promote(email, name = 'Salon team', password = null) {
-  const existing = findByEmail(email);
+  const existing = await findByEmail(email);
   if (existing) {
     // Keep the account's own name; the label is only a fallback for a row that
     // was created without one. The password is deliberately left untouched.
-    db.run(
-      "UPDATE users SET role = 'admin', name = COALESCE(NULLIF(name, ''), ?), updated_at = datetime('now') WHERE id = ?",
+    await db.run(
+      `UPDATE users SET role = 'admin', name = COALESCE(NULLIF(name, ''), ?), updated_at = ${NOW} WHERE id = ?`,
       normalizeText(name, 80) || 'Salon team',
       existing.id,
     );
-    return { user: findById(existing.id), created: false };
+    return { user: await findById(existing.id), created: false };
   }
   if (!password) {
     throw new Error(
@@ -161,8 +168,8 @@ async function promote(email, name = 'Salon team', password = null) {
     );
   }
   const user = await create({ email, name, password });
-  db.run("UPDATE users SET role = 'admin' WHERE id = ?", user.id);
-  return { user: findById(user.id), created: true };
+  await db.run("UPDATE users SET role = 'admin' WHERE id = ?", user.id);
+  return { user: await findById(user.id), created: true };
 }
 
 module.exports = {

@@ -128,53 +128,52 @@ const CATALOGUE = [
   },
 ];
 
-function seedSettings() {
+async function seedSettings() {
   let inserted = 0;
-  for (const [key, value, note] of SETTINGS) {
-    const found = db.get('SELECT key FROM settings WHERE key = ?', key);
-    if (found) continue;
-    db.run('INSERT INTO settings (key, value) VALUES (?, ?)', key, value);
-    inserted += 1;
+  for (const [key, value] of SETTINGS) {
+    const rows = await db.all(
+      'INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT (key) DO NOTHING RETURNING key',
+      key,
+      value,
+    );
+    inserted += rows.length;
   }
   return inserted;
 }
 
-function seedHours() {
+async function seedHours() {
   let inserted = 0;
   for (const row of HOURS) {
-    if (db.get('SELECT weekday FROM opening_hours WHERE weekday = ?', row.weekday)) continue;
-    db.run(
-      'INSERT INTO opening_hours (weekday, is_closed, opens_at, closes_at, note) VALUES (?, 0, ?, ?, ?)',
+    const rows = await db.all(
+      'INSERT INTO opening_hours (weekday, is_closed, opens_at, closes_at, note) VALUES (?, 0, ?, ?, ?) ON CONFLICT (weekday) DO NOTHING RETURNING weekday',
       row.weekday,
       row.opens,
       row.closes,
       `Placeholder closing time — studio to confirm for ${WEEKDAY_NAMES[row.weekday]}`,
     );
-    inserted += 1;
+    inserted += rows.length;
   }
   return inserted;
 }
 
-function seedCatalogue() {
+async function seedCatalogue() {
   const counts = { categories: 0, services: 0 };
-  CATALOGUE.forEach((category, categoryIndex) => {
-    let row = db.get('SELECT id FROM service_categories WHERE slug = ?', category.slug);
-    if (!row) {
-      const result = db.run(
-        'INSERT INTO service_categories (slug, name, summary, sort_order) VALUES (?, ?, ?, ?)',
-        category.slug,
-        category.name,
-        category.summary,
-        (categoryIndex + 1) * 10,
-      );
-      row = { id: result.lastInsertRowid };
-      counts.categories += 1;
-    }
-    category.services.forEach((service, serviceIndex) => {
-      if (db.get('SELECT id FROM services WHERE slug = ?', service.slug)) return;
-      db.run(
+  for (const [categoryIndex, category] of CATALOGUE.entries()) {
+    const made = await db.all(
+      'INSERT INTO service_categories (slug, name, summary, sort_order) VALUES (?, ?, ?, ?) ON CONFLICT (slug) DO NOTHING RETURNING id',
+      category.slug,
+      category.name,
+      category.summary,
+      (categoryIndex + 1) * 10,
+    );
+    if (made.length) counts.categories += 1;
+    const row = made.length
+      ? { id: Number(made[0].id) }
+      : await db.get('SELECT id FROM service_categories WHERE slug = ?', category.slug);
+    for (const [serviceIndex, service] of category.services.entries()) {
+      const added = await db.run(
         `INSERT INTO services (category_id, slug, name, description, duration_minutes, price_text, is_bookable, is_active, sort_order)
-         VALUES (?, ?, ?, ?, ?, NULL, 1, 1, ?)`,
+         VALUES (?, ?, ?, ?, ?, NULL, 1, 1, ?) ON CONFLICT (slug) DO NOTHING`,
         row.id,
         service.slug,
         service.name,
@@ -182,16 +181,16 @@ function seedCatalogue() {
         service.minutes,
         (serviceIndex + 1) * 10,
       );
-      counts.services += 1;
-    });
-  });
+      counts.services += added.changes;
+    }
+  }
   return counts;
 }
 
-function seed({ log = console.log } = {}) {
-  const settings = seedSettings();
-  const hours = seedHours();
-  const catalogue = seedCatalogue();
+async function seed({ log = console.log } = {}) {
+  const settings = await seedSettings();
+  const hours = await seedHours();
+  const catalogue = await seedCatalogue();
   log(
     `Seed complete — ${settings} settings, ${hours} weekday rows, ` +
       `${catalogue.categories} categories and ${catalogue.services} services added ` +

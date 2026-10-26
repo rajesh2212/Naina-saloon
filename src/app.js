@@ -8,7 +8,7 @@ const rateLimit = require('express-rate-limit');
 
 const { config, photoSlots } = require('./config');
 const db = require('./db');
-const { SqliteSessionStore } = require('./lib/session-store');
+const { PostgresSessionStore } = require('./lib/session-store');
 const { csrfMiddleware } = require('./lib/csrf');
 const flash = require('./lib/flash');
 const captcha = require('./lib/captcha');
@@ -36,12 +36,52 @@ function assetVersion() {
   }
 }
 
-function buildLocals() {
-  const opensAt = studio.earliestOpening();
+/**
+ * Page furniture that comes from the database — the "opens at" line, the
+ * booking rules, the catalogue counts. None of it changes more than a few times
+ * a year, and every one of those changes is a staff save, so it is read once and
+ * kept for a minute. Without the cache, every page on the site would wait on
+ * six round trips to a hosted database before it could render a header.
+ */
+const FURNITURE_TTL_MS = 60_000;
+let furniture = null;
+let furnitureLoading = null;
+
+function loadFurniture() {
+  if (furnitureLoading) return furnitureLoading;
+  furnitureLoading = Promise.all([
+    studio.earliestOpening(),
+    studio.bookingRules(),
+    catalogue.catalogueStats(),
+  ])
+    .then(([opensAt, rules, stats]) => {
+      furniture = { opensAt, rules, stats, fetchedAt: Date.now() };
+      furnitureLoading = null;
+      return furniture;
+    })
+    .catch((error) => {
+      furnitureLoading = null;
+      throw error;
+    });
+  return furnitureLoading;
+}
+
+/** The last good values, refreshed in the background when they go stale. */
+async function pageFurniture() {
+  const fresh = furniture && Date.now() - furniture.fetchedAt < FURNITURE_TTL_MS;
+  if (fresh) return furniture;
+  if (furniture) {
+    loadFurniture().catch(() => {});
+    return furniture;
+  }
+  return loadFurniture();
+}
+
+function buildLocals(data) {
   return {
     salon: {
       ...config.salon,
-      opensAtLabel: opensAt === null ? '9:00 am' : dates.formatTime12(dates.minutesToHm(opensAt)),
+      opensAtLabel: data.opensAt === null ? '9:00 am' : dates.formatTime12(dates.minutesToHm(data.opensAt)),
     },
     site: {
       captcha: captcha.status(),
@@ -49,7 +89,7 @@ function buildLocals() {
       photos: photoSlots(),
       isProduction: config.isProd,
     },
-    stats: catalogue.catalogueStats(),
+    stats: data.stats,
     assets: { version: assetVersion() },
   };
 }
@@ -135,7 +175,7 @@ function createApp() {
     session({
       name: config.session.name,
       secret: config.session.secret || 'naina-dev-only-secret-change-me',
-      store: new SqliteSessionStore(),
+      store: new PostgresSessionStore(),
       resave: false,
       saveUninitialized: true,
       rolling: true,
@@ -158,21 +198,25 @@ function createApp() {
   // Page furniture first: any template rendered below this point — including the
   // CSRF and error pages — needs salon/site/assets/currentUser present.
   app.use((req, res, next) => {
-    Object.assign(res.locals, buildLocals());
-    res.locals.currentPath = req.path;
-    res.locals.query = req.query;
+    pageFurniture()
+      .then(async (data) => {
+        Object.assign(res.locals, buildLocals(data));
+        res.locals.currentPath = req.path;
+        res.locals.query = req.query;
 
-    const uid = req.session && req.session.userId;
-    res.locals.currentUser = uid ? users.findById(uid) : null;
-    if (uid && !res.locals.currentUser) {
-      // Account deleted or deactivated mid-session.
-      req.session.destroy(() => {});
-      res.locals.currentUser = null;
-    }
-    res.locals.isAdmin = Boolean(res.locals.currentUser && res.locals.currentUser.role === 'admin');
-    res.locals.bookingRules = studio.bookingRules();
-    res.locals.dates = dates;
-    next();
+        const uid = req.session && req.session.userId;
+        res.locals.currentUser = uid ? await users.findById(uid) : null;
+        if (uid && !res.locals.currentUser) {
+          // Account deleted or deactivated mid-session.
+          req.session.destroy(() => {});
+          res.locals.currentUser = null;
+        }
+        res.locals.isAdmin = Boolean(res.locals.currentUser && res.locals.currentUser.role === 'admin');
+        res.locals.bookingRules = data.rules;
+        res.locals.dates = dates;
+        next();
+      })
+      .catch(next);
   });
 
   app.use(csrfMiddleware());
@@ -203,14 +247,13 @@ function createApp() {
     res.send(svg);
   });
 
-  app.get('/healthz', (req, res) => {
-    const ok = (() => {
-      try {
-        return Number(db.get('SELECT 1 AS one').one) === 1;
-      } catch {
-        return false;
-      }
-    })();
+  app.get('/healthz', async (req, res) => {
+    let ok = false;
+    try {
+      ok = Number((await db.get('SELECT 1 AS one')).one) === 1;
+    } catch {
+      ok = false;
+    }
     res.status(ok ? 200 : 503).json({
       ok,
       database: ok,
@@ -238,7 +281,10 @@ function createApp() {
 
   // eslint-disable-next-line no-unused-vars
   app.use((error, req, res, next) => {
-    const status = error.status || (error.code === 'SQLITE_CONSTRAINT' ? 409 : 500);
+    // 23505 is the partial unique index saying a slot is already taken; a
+    // constraint the app could not talk its way around is a clash, not a crash.
+    const clash = db.isConflict(error);
+    const status = error.status || (clash ? 409 : 500);
     if (status >= 500) {
       console.error('[error]', error.stack || error.message);
     }

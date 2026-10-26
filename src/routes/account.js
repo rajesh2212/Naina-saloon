@@ -29,16 +29,19 @@ function decorate(bookings) {
   }));
 }
 
-router.get('/', (req, res) => {
-  const bookings = decorate(slots.listUserBookings(res.locals.currentUser.id));
-  res.render('pages/account', {
-    title: 'My account',
-    bookings,
-    active: bookings.filter((b) => b.isOpen && !b.isPast),
-    history: bookings.filter((b) => !(b.isOpen && !b.isPast)),
-    phone: config.salon.phone,
-  });
-});
+router.get(
+  '/',
+  wrap(async (req, res) => {
+    const bookings = decorate(await slots.listUserBookings(res.locals.currentUser.id));
+    res.render('pages/account', {
+      title: 'My account',
+      bookings,
+      active: bookings.filter((b) => b.isOpen && !b.isPast),
+      history: bookings.filter((b) => !(b.isOpen && !b.isPast)),
+      phone: config.salon.phone,
+    });
+  }),
+);
 
 /**
  * The two lists the account pop-up shows, from the same rows the /account page
@@ -48,8 +51,8 @@ router.get('/', (req, res) => {
  * cancelled request therefore appears in both, which is why the panel labels the
  * second one as the record rather than the past.
  */
-function panelGroups(user) {
-  const bookings = decorate(slots.listUserBookings(user.id));
+async function panelGroups(user) {
+  const bookings = decorate(await slots.listUserBookings(user.id));
   return {
     current: bookings.filter((booking) => booking.status !== 'completed'),
     history: bookings,
@@ -61,8 +64,8 @@ function panelGroups(user) {
  * editor, photo editor) so a re-rendered form keeps its Block dropdown, its
  * completion bar and its photo exactly as the full page does.
  */
-function panelBody(user, over = {}) {
-  const groups = panelGroups(user);
+async function panelBody(user, over = {}) {
+  const groups = await panelGroups(user);
   return Object.assign(
     {
       panelMode: 'view',
@@ -97,11 +100,14 @@ function sendPanel(res, status, locals) {
   return res.render('partials/account-panel', locals);
 }
 
-router.get('/panel', (req, res) => {
-  const edit = String(req.query.edit || '');
-  const panelMode = edit === 'photo' ? 'photo' : edit === 'profile' ? 'profile' : 'view';
-  sendPanel(res, null, panelBody(res.locals.currentUser, { panelMode }));
-});
+router.get(
+  '/panel',
+  wrap(async (req, res) => {
+    const edit = String(req.query.edit || '');
+    const panelMode = edit === 'photo' ? 'photo' : edit === 'profile' ? 'profile' : 'view';
+    sendPanel(res, null, await panelBody(res.locals.currentUser, { panelMode }));
+  }),
+);
 
 // ---------------------------------------------------------------------------
 // Profile: the five details, the completion bar, and the avatar
@@ -121,8 +127,8 @@ function profileValues(user) {
 }
 
 // completeness() only asks whether a photo exists, so this stands in for a
-// posted picture that has cleared validation but is not on disk yet.
-const PENDING_PHOTO = 'awaiting-disk-write';
+// posted picture that has cleared validation but is not in the store yet.
+const PENDING_PHOTO = 'awaiting-store-write';
 
 /**
  * The three render sites for this page share one locals object so the bar, the
@@ -151,106 +157,109 @@ router.get('/profile', (req, res) => {
   res.render('pages/profile', profileLocals(res.locals.currentUser, profileValues(res.locals.currentUser), {}));
 });
 
-router.post('/profile', (req, res) => {
-  const user = res.locals.currentUser;
-  const values = {
-    name: req.body.name,
-    phone: req.body.phone,
-    preferredTitle: req.body.preferred_title,
-    notes: req.body.notes,
-    age: req.body.age,
-    address: req.body.address,
-    block: req.body.block,
-  };
-  const removePhoto = Boolean(req.body.remove_photo);
-  const photoData = String(req.body.photo_data || '');
+router.post(
+  '/profile',
+  wrap(async (req, res) => {
+    const user = res.locals.currentUser;
+    const values = {
+      name: req.body.name,
+      phone: req.body.phone,
+      preferredTitle: req.body.preferred_title,
+      notes: req.body.notes,
+      age: req.body.age,
+      address: req.body.address,
+      block: req.body.block,
+    };
+    const removePhoto = Boolean(req.body.remove_photo);
+    const photoData = String(req.body.photo_data || '');
 
-  // A posted picture only counts toward completion once its bytes check out,
-  // so decode before anything reaches the disk.
-  const pending = photoData && !removePhoto ? uploads.decodeImage(photoData) : null;
-  const draft = {
-    ...user,
-    name: values.name,
-    phone: values.phone,
-    age: values.age,
-    address: values.address,
-    block: values.block,
-    photo_path: removePhoto
-      ? null
-      : pending && pending.ok
-        ? PENDING_PHOTO
-        : user.photo_path,
-  };
+    // A posted picture only counts toward completion once its bytes check out,
+    // so decode before anything reaches the store.
+    const pending = photoData && !removePhoto ? uploads.decodeImage(photoData) : null;
+    const draft = {
+      ...user,
+      name: values.name,
+      phone: values.phone,
+      age: values.age,
+      address: values.address,
+      block: values.block,
+      photo_path: removePhoto
+        ? null
+        : pending && pending.ok
+          ? PENDING_PHOTO
+          : user.photo_path,
+    };
 
-  const errors = {
-    name: v.nameError(values.name),
-    phone: v.phoneError(values.phone),
-    preferredTitle: v.lengthError(v.normalizeText(values.preferredTitle, 24), 24, 'That title'),
-    notes: v.lengthError(v.normalizeMultiline(values.notes, 500), 500, 'Your note'),
-    age: profile.ageError(values.age),
-    address: profile.addressError(values.address),
-    block: profile.blockError(values.block),
-    photo: pending && !pending.ok ? pending.error : null,
-  };
-  const clean = Object.fromEntries(Object.entries(errors).filter(([, message]) => message));
-  const shown = { ...profileValues(user), ...values, preferredTitle: values.preferredTitle, removePhoto };
-  const editorMode = req.body.panel_mode === 'photo' ? 'photo' : 'profile';
+    const errors = {
+      name: v.nameError(values.name),
+      phone: v.phoneError(values.phone),
+      preferredTitle: v.lengthError(v.normalizeText(values.preferredTitle, 24), 24, 'That title'),
+      notes: v.lengthError(v.normalizeMultiline(values.notes, 500), 500, 'Your note'),
+      age: profile.ageError(values.age),
+      address: profile.addressError(values.address),
+      block: profile.blockError(values.block),
+      photo: pending && !pending.ok ? pending.error : null,
+    };
+    const clean = Object.fromEntries(Object.entries(errors).filter(([, message]) => message));
+    const shown = { ...profileValues(user), ...values, preferredTitle: values.preferredTitle, removePhoto };
+    const editorMode = req.body.panel_mode === 'photo' ? 'photo' : 'profile';
 
-  if (Object.keys(clean).length) {
-    const completionDraft = profile.completeness(draft);
-    if (panelWanted(req)) {
-      return sendPanel(
-        res,
-        400,
-        panelBody(res.locals.currentUser, { panelMode: editorMode, values: shown, errors: clean, completion: completionDraft }),
-      );
-    }
-    return res.status(400).render('pages/profile', profileLocals(user, shown, clean, completionDraft));
-  }
-
-  users.updateProfile(user.id, {
-    ...values,
-    block: profile.isBlock(values.block) ? v.normalizeText(values.block, 40) : '',
-  });
-
-  if (removePhoto) {
-    uploads.removeAvatar(user.photo_path);
-    users.setPhoto(user.id, null);
-  } else if (pending) {
-    const saved = uploads.saveAvatar(user.id, photoData, user.photo_path);
-    if (!saved.ok) {
+    if (Object.keys(clean).length) {
+      const completionDraft = profile.completeness(draft);
       if (panelWanted(req)) {
         return sendPanel(
           res,
           400,
-          panelBody(res.locals.currentUser, { panelMode: editorMode, notice: saved.error, noticeKind: 'error' }),
+          await panelBody(res.locals.currentUser, { panelMode: editorMode, values: shown, errors: clean, completion: completionDraft }),
         );
       }
-      flash.error(req, saved.error);
-      return res.redirect('/account/profile');
+      return res.status(400).render('pages/profile', profileLocals(user, shown, clean, completionDraft));
     }
-    users.setPhoto(user.id, saved.path);
-  }
 
-  const after = users.findById(user.id);
-  const completion = profile.completeness(after);
-  const message = completion.complete
-    ? 'Your details are saved — and everything the studio needs is there, so you can book a chair time.'
-    : `Saved. Your profile is ${completion.percent}% complete — still to add: ${completion.missing.join(', ')}.`;
+    await users.updateProfile(user.id, {
+      ...values,
+      block: profile.isBlock(values.block) ? v.normalizeText(values.block, 40) : '',
+    });
 
-  // The pop-up stays on the page it was opened on and shows the saved values,
-  // so the re-render reads the account back out of the database.
-  if (panelWanted(req)) {
-    return sendPanel(
-      res,
-      null,
-      panelBody(res.locals.currentUser, { user: after, values: profileValues(after), completion, notice: message }),
-    );
-  }
+    if (removePhoto) {
+      await uploads.removeAvatar(user.photo_path);
+      await users.setPhoto(user.id, null);
+    } else if (pending) {
+      const saved = await uploads.saveAvatar(user.id, photoData, user.photo_path);
+      if (!saved.ok) {
+        if (panelWanted(req)) {
+          return sendPanel(
+            res,
+            400,
+            await panelBody(res.locals.currentUser, { panelMode: editorMode, notice: saved.error, noticeKind: 'error' }),
+          );
+        }
+        flash.error(req, saved.error);
+        return res.redirect('/account/profile');
+      }
+      await users.setPhoto(user.id, saved.path);
+    }
 
-  flash.success(req, message);
-  return res.redirect(afterProfileRedirect(req, completion));
-});
+    const after = await users.findById(user.id);
+    const completion = profile.completeness(after);
+    const message = completion.complete
+      ? 'Your details are saved — and everything the studio needs is there, so you can book a chair time.'
+      : `Saved. Your profile is ${completion.percent}% complete — still to add: ${completion.missing.join(', ')}.`;
+
+    // The pop-up stays on the page it was opened on and shows the saved values,
+    // so the re-render reads the account back out of the database.
+    if (panelWanted(req)) {
+      return sendPanel(
+        res,
+        null,
+        await panelBody(res.locals.currentUser, { user: after, values: profileValues(after), completion, notice: message }),
+      );
+    }
+
+    flash.success(req, message);
+    return res.redirect(afterProfileRedirect(req, completion));
+  }),
+);
 
 /**
  * Save progress, then carry on. While details are missing the profile stays
@@ -326,7 +335,7 @@ router.post(
 router.get(
   '/ticket/:id(\\d+)',
   wrap(async (req, res) => {
-    const owned = slots.bookingById(Number(req.params.id));
+    const owned = await slots.bookingById(Number(req.params.id));
     if (!owned || owned.user_id !== res.locals.currentUser.id) return renderNoTicket(res);
     const result = await ticket.ensure(owned.id);
     if (!result.ok) return renderNoTicket(res);
@@ -339,17 +348,20 @@ function renderNoTicket(res) {
   return res.render('errors/404', { title: 'No ticket for that booking' });
 }
 
-router.post('/bookings/:id/cancel', (req, res) => {
-  const id = Number(req.params.id);
-  if (!Number.isInteger(id)) return res.status(400).redirect('/account');
-  try {
-    const booking = slots.cancelBooking({ bookingId: id, userId: res.locals.currentUser.id });
-    flash.success(req, `Booking for ${booking.service_name} on ${dates.formatLongDate(booking.slot_date)} was cancelled. That time is free again.`);
-  } catch (error) {
-    flash.error(req, error.status ? error.message : 'Could not cancel that booking. Please call the studio.');
-  }
-  return res.redirect('/account');
-});
+router.post(
+  '/bookings/:id/cancel',
+  wrap(async (req, res) => {
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id)) return res.status(400).redirect('/account');
+    try {
+      const booking = await slots.cancelBooking({ bookingId: id, userId: res.locals.currentUser.id });
+      flash.success(req, `Booking for ${booking.service_name} on ${dates.formatLongDate(booking.slot_date)} was cancelled. That time is free again.`);
+    } catch (error) {
+      flash.error(req, error.status ? error.message : 'Could not cancel that booking. Please call the studio.');
+    }
+    return res.redirect('/account');
+  }),
+);
 
 // Exposed so scripts/check.js can pin the pop-up’s rules — the Current / history
 // split, the tick, the locals it renders — against real rows, without HTTP.

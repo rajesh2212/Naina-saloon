@@ -41,25 +41,27 @@ simulated.
 
 The project directory was empty, so it needed a full-stack choice rather than a
 framework to follow. It is a **server-rendered Express 4 + EJS 3 app on Node.js,
-with SQLite as the only datastore**, and nine runtime dependencies:
+with Postgres as the only datastore**, and eleven runtime dependencies:
 
 | Dependency | Why it is here |
 | --- | --- |
 | `express`, `ejs` | Server-rendered pages. Booking correctness has to live on the server, so there is no reason to ship a second copy of the logic to the browser. |
-| `node:sqlite` (built into Node ≥ 22.5) | A real relational database with transactions and unique indexes, with **no native compilation step**. On Windows, `better-sqlite3`/`sqlite3` need a C++ toolchain; the built-in `DatabaseSync` API does not. |
+| `pg` | The database. Postgres is what lets the app run on a host that gives each request a fresh, read-only filesystem — a SQLite file cannot survive there. Transactions, unique indexes and CHECK constraints all still do the enforcing. |
 | `bcryptjs` | Password hashing (pure JS, installs anywhere). |
-| `express-session` | Server-side sessions stored in SQLite. |
+| `express-session` | Server-side sessions stored in Postgres. |
 | `helmet` | Security headers, including a strict Content Security Policy. |
 | `express-rate-limit` | Throttling on authentication endpoints. |
 | `nodemailer`, `svg-captcha` | Password-reset mail, and the built-in image CAPTCHA. |
-| `pdf-lib` | The confirmed-booking ticket PDF. Pure JS (no native build, no headless browser), and it writes the file to disk rather than rendering it through a browser the client could tamper with. |
+| `pdf-lib` | The confirmed-booking ticket PDF. Pure JS (no native build, no headless browser). |
+| `@vercel/blob` | Object storage for the files the app writes for real people (ticket PDFs, avatars). Installed and provisioned; the code still writes them to `./uploads` until that folder moves. |
 
 There is no build step, no bundler and no client-side framework: `public/main.js`
 is plain ES5-compatible JavaScript that only *enhances* the booking page. With
 JavaScript switched off every page still works, because slot lists, date changes
 and the booking submission are ordinary server-rendered forms and links.
 
-**Requirements:** Node.js **22.5 or newer** (checked with v22.14.0), npm 10.
+**Requirements:** Node.js **24** (pinned in `package.json` `engines`, and the
+runtime on both hosts), npm 10, and a Postgres database.
 
 ---
 
@@ -72,11 +74,13 @@ npm install
 # 2. Create your own .env — never edit .env.example, and never commit .env
 cp .env.example .env
 
-# 3. Set at least the session secret
+# 3. Set at least the session secret, and the Postgres URL
 node -e "console.log(require('crypto').randomBytes(48).toString('hex'))"
 #    → paste that value in as SESSION_SECRET= in .env
+#    → DATABASE_URL= is the pooled connection string from your host (Neon,
+#      Vercel Postgres, or a local Postgres). Nothing else can store data.
 
-# 4. Create the database, weekly hours, settings and the service catalogue
+# 4. Create the tables, weekly hours, settings and the service catalogue
 npm run db:setup
 
 # 5. Make the first staff login (asks on the terminal)
@@ -91,21 +95,31 @@ npm start
 Then open <http://127.0.0.1:3000>, register a customer account from the site,
 and sign in as the staff user at `/portal` to confirm the request.
 
-To see the booking-integrity guarantees exercised against a throwaway copy of
-your database:
+To see the booking-integrity guarantees exercised against your database:
 
 ```bash
 npm run check
 ```
 
+It runs against the real `DATABASE_URL`. The booking suite does everything —
+create, confirm, double-book, cancel — inside one transaction that is always
+rolled back, so no test row survives; the groups that also write files (avatars
+and ticket PDFs) sit outside it, make their own throwaway accounts, and delete
+both rows and files on the way out.
+
 ### Resetting to an empty database
 
-Stop the server, then delete the SQLite files and rebuild:
+This destroys every account, booking and session in whichever database the URL
+points at, so run it against a development one only — there is no undo:
 
 ```bash
-rm -f data/naina.db data/naina.db-wal data/naina.db-shm
+psql "$DATABASE_URL" -c 'drop schema public cascade; create schema public;'
 npm run db:setup && npm run create-admin
 ```
+
+On Neon or Vercel Postgres the dashboard has the same reset button. To be sure
+which database you are about to erase: `npm run check` prints the host and
+database name it is talking to — never the password.
 
 ---
 
@@ -121,7 +135,7 @@ this repository.**
 | --- | --- |
 | `SESSION_SECRET` | Signs session cookies. The app refuses to boot with `NODE_ENV=production` and no secret. |
 | `PUBLIC_APP_URL` | Absolute origin used to build password-reset links, so it must match what clients actually type. |
-| `DATABASE_FILE` | Path to the SQLite file (default `./data/naina.db`). Keep it off any publicly served directory. |
+| `DATABASE_URL` | Postgres connection string for users, services, hours, slots, bookings and sessions — `POSTGRES_URL` is accepted too, which is what Vercel injects. Use the **pooled** endpoint. The app never logs it: the boot banner, `npm run check` and `/portal/details` all show host + database name with the credentials left out. |
 | `UPLOADS_DIR` | Where booking PDFs and avatars are written (default `./uploads`). Only a host with separate persistent storage needs it; never point it inside `public/` — see [Where the customer's files live](#where-the-customers-files-live). |
 | `SMTP_HOST`/`SMTP_PORT`/`SMTP_USER`/`SMTP_PASS`/`MAIL_FROM` | Needed for the forgot-password flow to actually deliver a link. |
 | `COOKIE_SECURE=1`, `TRUST_PROXY=1` | Set both once the site is behind HTTPS and a reverse proxy. |
@@ -192,7 +206,7 @@ src/
   config.js               .env loading + normalised config object
   app.js                  middleware order, CSP, rate limits, error pages
   db/
-    index.js              node:sqlite handle, WAL, helpers (get/all/run/tx)
+    index.js              pg Pool, ? → $n rewriting, async helpers (all/get/value/run/insert/tx/savepoint)
     migrate.js            ledger-backed migration runner (schema_migrations)
     migrations/001_init.sql
     migrations/002_staff_portal.sql
@@ -219,7 +233,7 @@ public/                   styles.css, portal.css, main.js, portal.js, favicon.sv
 uploads/avatars/          customer photos, created on first upload (gitignored)
 uploads/tickets/          one PDF per confirmed booking, created on confirmation (gitignored)
 scripts/                  migrate, seed, create-admin, generate-slots, ticket-art, check
-data/                     SQLite database + dev outbox (gitignored)
+data/                     dev mail outbox (gitignored) — the database is not here any more
 Dockerfile                node:24, npm ci --omit=dev, runs as the node user
 .dockerignore             keeps data/, uploads/ and .env out of the image
 fly.toml                  Fly.io: one machine, /data volume, production env, /healthz
@@ -230,8 +244,12 @@ fly.toml                  Fly.io: one machine, /data volume, production env, /he
 ## Database schema and migrations
 
 Migrations are plain numbered SQL files applied once each, tracked in
-`schema_migrations` (created by the runner). SQLite runs in WAL mode with
-`foreign_keys = ON` and a 5 s `busy_timeout`.
+`schema_migrations` (created by the runner). They are Postgres SQL: ids are
+`BIGINT GENERATED BY DEFAULT AS IDENTITY`, session payloads are `JSONB`, the
+booking lock is a **partial unique index** (one live booking per slot, so a
+cancelled or served one does not block the time), and every timestamp column is
+TEXT written as `to_char(now(), 'YYYY-MM-DD HH24:MI:SS')` — the exact shape
+`src/lib/dates.js` already parses, so no formatter had to change.
 
 | Table | Holds |
 | --- | --- |
@@ -264,14 +282,18 @@ Three independent layers stop two people taking the same time:
 
 1. **Availability query** — booked slots are filtered out of every list, so they
    never appear in the UI or in `/api/availability`.
-2. **`BEGIN IMMEDIATE` transaction** — `createBooking()` re-checks
-   `activeBookingExists()` while holding the write lock, then inserts the slot
-   claim and the booking row together, so a check-then-insert race cannot slip
-   through.
+2. **One transaction per booking** — `createBooking()` runs inside
+   `db.transaction()`, which pins the work to a single pooled connection and
+   re-checks `activeBookingCount()`, the slot's own status and
+   `slotIsHeld()` before it inserts, so the ordinary path never writes a clash.
 3. **Partial unique index** — `bookings_one_active_per_slot_key ON
-   bookings (slot_id) WHERE status IN ('pending','confirmed')`. Even a direct
-   `INSERT` from a different process fails. Cancelled bookings do not hold the
-   key, so a freed slot becomes bookable again.
+   bookings (slot_id) WHERE status IN ('pending','confirmed')`. This is the
+   arbiter: two requests that race past the checks both try to insert, Postgres
+   makes the second one wait for the first, and the loser comes back as `23505`
+   — which `createBooking()` turns into the same "someone has just taken that
+   slot" message the checks give. Even a direct `INSERT` from another process
+   fails. Cancelled and served bookings do not hold the key, so a freed slot
+   becomes bookable again.
 
 Staff status changes go through the same guard, with the booking's own id
 excluded so a request can move `pending → confirmed` without clashing with
@@ -312,7 +334,7 @@ field validators, so the bar, the flash message and the gate can never disagree
 with each other. The list is the Blocks of Bhadrak district, spelled as the
 dropdown shows them: Bhadrak, Basudevpur, Bhandaripokhari, Bonth, Chandabali,
 Dhamnagar, Tihidi. Migration `003` puts the same list in a `CHECK` constraint, so
-a value typed past the form is refused by SQLite as well as by the route.
+a value typed past the form is refused by the database as well as by the route.
 
 **Where the rule lives.** `src/routes/booking.js` opens with
 `router.use(requireUser, requireProfile)`, which runs before every booking page,
@@ -661,13 +683,23 @@ different requests and expects the owner to be the only one served.
 
 ## Running it on a server
 
+> **Where this branch is.** `master` now talks only to Postgres: it boots, runs
+> `npm run check` and serves every page against a hosted database, and the
+> tickets and avatars are still written to `./uploads`. The live site
+> (`naina-beauty-parlour.fly.dev`) is the last SQLite build, deployed before the
+> port, and it keeps running that release until something is pushed to it — but
+> `fly deploy` of *this* commit would start a machine with no `DATABASE_URL` and
+> no writable-folder story that fits. The sections below about the volume,
+> `naina.db` and backups therefore describe the **deployed** app, not this code.
+> The cutover that replaces them is tasks #65–#67: Blob storage for the files, a
+> Vercel entry point, then verification.
+
 This is a Node process, not a folder of files: every page is an EJS template
-rendered per request, sessions and bookings live in a SQLite file, and a ticket is
+rendered per request, sessions and bookings live in the database, and a ticket is
 drawn with `pdf-lib` when staff confirm one. There is **no build step and no static
 output to upload** — a host has to be able to run `npm start` and keep the process
-alive. Shared PHP hosting cannot do this at all: no Node runtime, no long-lived
-process, and no writable directory that survives a restart for a WAL-mode SQLite
-file.
+alive. Shared PHP hosting cannot do this at all: no Node runtime, and no long-lived
+process.
 
 `Dockerfile`, `.dockerignore` and `fly.toml` are set up for
 [Fly.io](https://fly.io), which builds the image on its own builder — so this works
@@ -742,8 +774,9 @@ a bare copy of the main `.db` while writes are still in `-wal` misses them.
 - **Passwords** — bcrypt (cost 12) over a SHA-256 pre-hash; never plaintext,
   never logged. Strength checks reject the account's own email/name and
   passwords under 10 characters.
-- **Sessions** — server-side SQLite store, `httpOnly`, `SameSite=Lax`, rolling 7
-  day expiry, session id **regenerated on login and on password change**
+- **Sessions** — server-side Postgres store, one `JSONB` row per session id,
+  `httpOnly`, `SameSite=Lax`, rolling 7 day expiry, session id **regenerated on
+  login and on password change**
   (fixation guard), destroyed when the account disappears. Changing a password
   clears every other session *and* every outstanding reset link for that
   account, so an old phone cannot keep working with a superseded password.
@@ -759,7 +792,8 @@ a bare copy of the main `.db` while writes are still in `-wal` misses them.
   per-email throttle on login so one busy network does not lock the whole town
   out, and a bounded throttle on reset requests.
 - **Input handling** — every field validated and length-capped on the server;
-  EJS escapes by default; SQLite statements are always parameterised (no string
+  EJS escapes by default; every SQL statement is parameterised (one `?` per
+  value, rewritten to Postgres `$n` — no string
   interpolation into SQL); body size capped at 100 kB, with a route-scoped 800 kB
   limit on `/account/profile` alone so a re-sized avatar can be posted — the
   uploaded bytes are still capped at 400 kB, signature-checked, and renamed by

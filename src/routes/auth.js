@@ -127,7 +127,7 @@ router.post(
       return fail(clean);
     }
 
-    if (users.findByEmail(values.email)) {
+    if (await users.findByEmail(values.email)) {
       captcha.issue(req);
       return fail(
         {
@@ -138,13 +138,30 @@ router.post(
       );
     }
 
-    const user = await users.create({
-      email: values.email,
-      name: values.name,
-      password: req.body.password,
-      phone: values.phone,
-      preferredTitle: values.preferredTitle,
-    });
+    let user;
+    try {
+      user = await users.create({
+        email: values.email,
+        name: values.name,
+        password: req.body.password,
+        phone: values.phone,
+        preferredTitle: values.preferredTitle,
+      });
+    } catch (error) {
+      // Two sign-ups for one email can both pass the read above; the unique
+      // index on LOWER(email) is what actually decides it.
+      if (db.isConflict(error)) {
+        captcha.issue(req);
+        return fail(
+          {
+            email: 'That email already has an account. Sign in, or use “Forgot password” to reset it.',
+            form: 'Please check the details above.',
+          },
+          409,
+        );
+      }
+      throw error;
+    }
     if (!user) return fail({ form: 'We could not create that account. Please try again.' }, 500);
 
     throttle.clear(`register:${req.ip}`);
@@ -217,7 +234,7 @@ router.post(
     }
 
     throttle.clear(`login-email:${email}`);
-    users.recordLogin(outcome.user.id);
+    await users.recordLogin(outcome.user.id);
     const firstName = v.normalizeText(outcome.user.name, 40).split(' ')[0];
     const intended = safeReturnTo(req, outcome.user.role === 'admin' ? '/portal' : '/account');
     // Heading for a booking with an incomplete profile: the gate would send them
@@ -279,22 +296,22 @@ router.post(
     }
 
     const status = mailStatus();
-    const user = users.findForAuth(email);
+    const user = await users.findForAuth(email);
 
     if (user && status.enabled) {
       const token = randomToken();
       const expiresAt = new Date(Date.now() + RESET_TTL_MINUTES * 60_000).toISOString().replace('T', ' ').slice(0, 19);
-      const inserted = db.run(
+      const inserted = await db.insert(
         'INSERT INTO password_resets (user_id, token_hash, expires_at) VALUES (?, ?, ?)',
         user.id,
         digestToken(token),
         expiresAt,
       );
       // Only the newest link for an account stays live.
-      db.run(
+      await db.run(
         'DELETE FROM password_resets WHERE user_id = ? AND used_at IS NULL AND id <> ?',
         user.id,
-        inserted.lastInsertRowid,
+        inserted.id,
       );
 
       const template = passwordResetMail({
@@ -314,7 +331,7 @@ router.post(
       }
 
       console.error('[mail] reset send failed:', result.error);
-      db.run('DELETE FROM password_resets WHERE id = ?', inserted.lastInsertRowid);
+      await db.run('DELETE FROM password_resets WHERE id = ?', inserted.id);
       return res.status(502).render('auth/forgot', {
         title: 'Forgot your password',
         next: nextFromQuery(req),
@@ -366,8 +383,8 @@ function renderInvalid(res) {
   return res.status(410).render('auth/reset-invalid', { title: 'That reset link has expired' });
 }
 
-router.get('/reset/:token', (req, res) => {
-  const row = TOKEN_RE.test(req.params.token) ? findResetRow(req.params.token) : null;
+router.get('/reset/:token', wrap(async (req, res) => {
+  const row = TOKEN_RE.test(req.params.token) ? await findResetRow(req.params.token) : null;
   if (!row || row.used_at || row.expires_at <= nowSql()) return renderInvalid(res);
   res.render('auth/reset', {
     title: 'Choose a new password',
@@ -376,7 +393,7 @@ router.get('/reset/:token', (req, res) => {
     errors: {},
     captchaNext: Date.now(),
   });
-});
+}));
 
 router.post(
   '/reset/:token',
@@ -384,7 +401,7 @@ router.post(
   wrap(async (req, res, next) => {
     const rawToken = req.params.token;
     if (!TOKEN_RE.test(rawToken)) return renderInvalid(res);
-    const row = findResetRow(rawToken);
+    const row = await findResetRow(rawToken);
     if (!row || row.used_at || row.expires_at <= nowSql() || !digestMatches(rawToken, row.token_hash)) {
       return renderInvalid(res);
     }
@@ -410,7 +427,10 @@ router.post(
 
     // Hash before touching the session so the new password is certainly saved.
     await users.changePassword(row.user_id, req.body.password);
-    db.run("UPDATE password_resets SET used_at = datetime('now') WHERE id = ?", row.id);
+    await db.run(
+      "UPDATE password_resets SET used_at = to_char(now(), 'YYYY-MM-DD HH24:MI:SS') WHERE id = ?",
+      row.id,
+    );
     throttle.clear(`reset:${req.ip}`);
 
     return signInFreshSession(req, res, next, {

@@ -1,0 +1,15 @@
+# Vercel builds and deploys the source it is given. Everything below stays on
+# this machine: it holds real customer names, phone numbers, faces, sessions and
+# credentials, none of which the running site needs in order to be built.
+#
+# Listed individually rather than as `.env.*` so `.env.example` — a template with
+# placeholder values only — keeps travelling with the code.
+.env
+.env.local
+.env.production
+data/
+uploads/
+.vercel
+.git
+node_modules
+*.log

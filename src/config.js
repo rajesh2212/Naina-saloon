@@ -8,14 +8,12 @@ const path = require('node:path');
 
 const ROOT = path.resolve(__dirname, '..');
 
-function loadEnvFile() {
-  const file = path.join(ROOT, '.env');
-  if (!fs.existsSync(file)) return false;
-  if (typeof process.loadEnvFile === 'function') {
-    process.loadEnvFile(file);
-    return true;
-  }
-  // Fallback parser for Node builds without process.loadEnvFile().
+// `.env.local` first so a `vercel env pull` of the real backend config wins
+// over a hand-written `.env`, while a variable the host already set (a deploy
+// platform, a shell export) still beats both.
+const ENV_FILES = ['.env.local', '.env'];
+
+function parseEnvFile(file) {
   for (const rawLine of fs.readFileSync(file, 'utf8').split(/\r?\n/)) {
     const line = rawLine.trim();
     if (!line || line.startsWith('#')) continue;
@@ -28,7 +26,21 @@ function loadEnvFile() {
     }
     if (process.env[key] === undefined) process.env[key] = value;
   }
-  return true;
+}
+
+function loadEnvFile() {
+  let loaded = false;
+  for (const name of ENV_FILES) {
+    const file = path.join(ROOT, name);
+    if (!fs.existsSync(file)) continue;
+    if (name === '.env' && typeof process.loadEnvFile === 'function') {
+      process.loadEnvFile(file);
+    } else {
+      parseEnvFile(file);
+    }
+    loaded = true;
+  }
+  return loaded;
 }
 
 const envFileLoaded = loadEnvFile();
@@ -44,9 +56,23 @@ const int = (value, def) => {
 };
 const str = (value, def = '') => (value === undefined || value === '' ? def : String(value));
 
+// host + database name, with the credentials from the URL left out. Safe to
+// print in `npm run check` output and logs.
+function databaseLabel(url) {
+  if (!url) return 'not configured';
+  try {
+    const parsed = new URL(url);
+    return `postgres://${parsed.hostname}${parsed.pathname}`;
+  } catch {
+    return 'not configured';
+  }
+}
+
 const nodeEnv = str(env.NODE_ENV, 'development');
 const isProd = nodeEnv === 'production';
-const dbFile = path.resolve(ROOT, str(env.DATABASE_FILE, './data/naina.db'));
+// Vercel's Postgres integration exposes POSTGRES_URL; DATABASE_URL is the
+// generic name every other host uses. Either is enough.
+const dbUrl = str(env.DATABASE_URL) || str(env.POSTGRES_URL);
 const publicUrl = str(env.PUBLIC_APP_URL, `http://${str(env.HOST, '127.0.0.1')}:${str(env.PORT, '3000')}`);
 
 const smtpHost = str(env.SMTP_HOST);
@@ -66,7 +92,10 @@ const config = {
     trustProxy: bool(env.TRUST_PROXY, false),
   },
 
-  db: { file: dbFile, dir: path.dirname(dbFile) },
+  // Postgres, because the app has to run where the disk is read-only and
+  // wiped between requests. No URL means no boot rather than a site that
+  // accepts bookings and forgets them a minute later.
+  db: { url: dbUrl },
 
   // Where the files the app writes for real people live: each confirmed
   // booking's PDF ticket and every customer avatar. This is deliberately NOT
@@ -168,7 +197,8 @@ function describeConfig() {
   return {
     env: config.nodeEnv,
     envFileLoaded: config.envFileLoaded,
-    database: config.db.file,
+    // Never the URL itself — it carries the database password.
+    database: databaseLabel(config.db.url),
     publicUrl: config.http.publicUrl,
     sessionSecretSet: Boolean(config.session.secret),
     captchaProvider: config.captcha.provider,
@@ -208,4 +238,4 @@ function photoSlots() {
   return groups;
 }
 
-module.exports = { config, describeConfig, photoSlots };
+module.exports = { config, describeConfig, databaseLabel, photoSlots };

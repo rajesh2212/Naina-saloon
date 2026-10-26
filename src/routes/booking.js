@@ -13,6 +13,7 @@ const dates = require('../lib/dates');
 const v = require('../lib/validate');
 const { flash } = require('../lib/flash');
 const throttle = require('../lib/auth-rate-limit');
+const { wrap } = require('../lib/async');
 const { requireUser, requireProfile } = require('../lib/guards');
 
 const router = express.Router();
@@ -24,9 +25,9 @@ router.use(requireUser, requireProfile);
 
 const today = () => dates.salonClock().date;
 
-function buildDateStrip(serviceId, selected) {
-  const rules = studio.bookingRules();
-  const calendar = slots.availabilityCalendar(serviceId, { days: Math.min(rules.horizonDays, 14) });
+async function buildDateStrip(serviceId, selected) {
+  const rules = await studio.bookingRules();
+  const calendar = await slots.availabilityCalendar(serviceId, { days: Math.min(rules.horizonDays, 14) });
   return calendar.map((entry) => ({
     ...entry,
     label: dates.formatShortDate(entry.date),
@@ -35,8 +36,8 @@ function buildDateStrip(serviceId, selected) {
   }));
 }
 
-router.get('/', (req, res) => {
-  const groups = catalogue.bookableServicesGrouped();
+router.get('/', wrap(async (req, res) => {
+  const groups = await catalogue.bookableServicesGrouped();
   const services = groups.flatMap((group) => group.services);
   const preselect = Number(req.query.service) || null;
   const chosen = preselect ? services.find((s) => s.id === preselect) || null : null;
@@ -59,31 +60,36 @@ router.get('/', (req, res) => {
   }
 
   return res.redirect(`/book/${chosen.id}`);
-});
+}));
 
-router.get('/:serviceId(\\d+)', (req, res) => {
-  const service = catalogue.allBookableServices().find((row) => row.id === Number(req.params.serviceId));
+router.get('/:serviceId(\\d+)', wrap(async (req, res) => {
+  const serviceId = Number(req.params.serviceId);
+  const [services, rules] = await Promise.all([catalogue.allBookableServices(), studio.bookingRules()]);
+  const service = services.find((row) => row.id === serviceId);
   if (!service) {
     res.status(404);
     return res.render('errors/404', { title: 'Service not found' });
   }
 
-  const rules = studio.bookingRules();
   const min = dates.addDays(today(), 0);
   const max = dates.addDays(today(), rules.horizonDays);
   let date = String(req.query.date || '');
   if (!dates.isValidDate(date) || date < min || date > max) date = min;
 
-  const availability = slots.availableSlots(service.id, date);
+  const [availability, dateStrip, groups] = await Promise.all([
+    slots.availableSlots(service.id, date),
+    buildDateStrip(service.id, date),
+    catalogue.bookableServicesGrouped(),
+  ]);
   return res.render('pages/book', {
     title: `Book ${service.name}`,
-    groups: catalogue.bookableServicesGrouped(),
+    groups,
     step: 2,
     chosen: service,
     date,
     minDate: min,
     maxDate: max,
-    dateStrip: buildDateStrip(service.id, date),
+    dateStrip,
     availability,
     values: {
       note: '',
@@ -95,15 +101,15 @@ router.get('/:serviceId(\\d+)', (req, res) => {
     requiresSignIn: !res.locals.currentUser,
     phone: config.salon.phone,
   });
-});
+}));
 
 /** Server-rendered fallback and the JSON the page's JS both use this. */
-router.get('/:serviceId(\\d+)/slots', (req, res) => {
+router.get('/:serviceId(\\d+)/slots', wrap(async (req, res) => {
   const serviceId = Number(req.params.serviceId);
   const date = String(req.query.date || '');
   if (!dates.isValidDate(date)) return res.status(400).json({ ok: false, error: 'Choose a valid date.' });
   try {
-    const result = slots.availableSlots(serviceId, date);
+    const result = await slots.availableSlots(serviceId, date);
     return res.json({
       ok: true,
       date,
@@ -115,12 +121,12 @@ router.get('/:serviceId(\\d+)/slots', (req, res) => {
   } catch (error) {
     return res.status(error.status || 500).json({ ok: false, error: error.message || 'Availability is unavailable.' });
   }
-});
+}));
 
 router.post(
   '/',
   throttle.throttle({ name: 'booking', max: 12, windowMs: 60 * 60 * 1000 }),
-  (req, res) => {
+  wrap(async (req, res) => {
     const serviceId = Number(req.body.service_id);
     const slotId = Number(req.body.slot_id);
     const values = {
@@ -128,7 +134,8 @@ router.post(
       preferredTitle: req.body.preferred_title,
       note: req.body.note,
     };
-    const service = serviceId ? catalogue.allBookableServices().find((row) => row.id === serviceId) : null;
+    const [services, rules] = await Promise.all([catalogue.allBookableServices(), studio.bookingRules()]);
+    const service = serviceId ? services.find((row) => row.id === serviceId) : null;
 
     const errors = {
       service: service ? null : 'Please choose a service.',
@@ -139,34 +146,36 @@ router.post(
     };
     const clean = Object.fromEntries(Object.entries(errors).filter(([, message]) => message));
 
-    const rerender = (message, status) => {
+    const rerender = async (message, status) => {
       const date = String(req.body.date || '') || today();
-      const availability = service ? slots.availableSlots(service.id, date) : { slots: [], notice: 'Choose a service again.' };
+      const availability = service
+        ? await slots.availableSlots(service.id, date)
+        : { slots: [], notice: 'Choose a service again.' };
       res.status(status).render('pages/book', {
         title: service ? `Book ${service.name}` : 'Book an appointment',
-        groups: catalogue.bookableServicesGrouped(),
+        groups: await catalogue.bookableServicesGrouped(),
         step: 2,
         chosen: service,
         date,
         minDate: today(),
-        maxDate: dates.addDays(today(), studio.bookingRules().horizonDays),
-        dateStrip: service ? buildDateStrip(service.id, date) : [],
+        maxDate: dates.addDays(today(), rules.horizonDays),
+        dateStrip: service ? await buildDateStrip(service.id, date) : [],
         availability,
         values,
         errors: { ...clean, form: message },
-        rules: studio.bookingRules(),
+        rules,
         requiresSignIn: false,
         phone: config.salon.phone,
       });
     };
 
     if (Object.keys(clean).length) return rerender('Please check the details below.', 400);
-    if (!availabilityHasSlot(service.id, slotId, date(req.body.date))) {
+    if (!(await availabilityHasSlot(service.id, slotId, date(req.body.date)))) {
       return rerender('That time is no longer free — it has just been taken or the list changed. Please choose another slot.', 409);
     }
 
     try {
-      const booking = slots.createBooking({
+      const booking = await slots.createBooking({
         userId: res.locals.currentUser.id,
         serviceId: service.id,
         slotId,
@@ -192,7 +201,7 @@ router.post(
       if (!error.status) console.error('[booking]', error);
       return rerender(message, 409);
     }
-  },
+  }),
 );
 
 function date(value) {
@@ -200,17 +209,17 @@ function date(value) {
 }
 
 /** Cheap pre-check purely for a friendly message; the real guard is the transaction. */
-function availabilityHasSlot(serviceId, slotId, value) {
+async function availabilityHasSlot(serviceId, slotId, value) {
   try {
-    const { slots: list } = slots.availableSlots(serviceId, value);
+    const { slots: list } = await slots.availableSlots(serviceId, value);
     return list.some((slot) => slot.id === slotId);
   } catch {
     return false;
   }
 }
 
-router.get('/done/:id', (req, res) => {
-  const booking = slots.bookingById(Number(req.params.id));
+router.get('/done/:id', wrap(async (req, res) => {
+  const booking = await slots.bookingById(Number(req.params.id));
   if (!booking || booking.user_id !== res.locals.currentUser.id) {
     res.status(404);
     return res.render('errors/404', { title: 'Booking not found' });
@@ -225,6 +234,6 @@ router.get('/done/:id', (req, res) => {
     },
     phone: config.salon.phone,
   });
-});
+}));
 
 module.exports = router;

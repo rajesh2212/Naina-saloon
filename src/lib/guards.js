@@ -4,10 +4,11 @@ const { config } = require('../config');
 const users = require('./users');
 const profile = require('./profile');
 const { flash } = require('./flash');
+const { wrap } = require('./async');
 
-function requireUser(req, res, next) {
+const requireUser = wrap(async (req, res, next) => {
   const id = req.session && req.session.userId;
-  const user = id ? users.findById(id) : null;
+  const user = id ? await users.findById(id) : null;
   if (user) {
     res.locals.currentUser = user;
     res.locals.isAdmin = user.role === 'admin';
@@ -24,11 +25,11 @@ function requireUser(req, res, next) {
   }
   flash.error(req, 'Please sign in to continue.');
   return res.redirect('/auth/login');
-}
+});
 
-function requireAdmin(req, res, next) {
+const requireAdmin = wrap(async (req, res, next) => {
   const id = req.session && req.session.userId;
-  const user = id ? users.findById(id) : null;
+  const user = id ? await users.findById(id) : null;
   if (user && user.role === 'admin' && user.is_active) {
     res.locals.currentUser = user;
     res.locals.isAdmin = true;
@@ -45,7 +46,7 @@ function requireAdmin(req, res, next) {
       : 'Please sign in with a salon staff account.',
     isAdminSignIn: Boolean(user),
   });
-}
+});
 
 /**
  * Chair time is only released to a profile that has all five details, Block

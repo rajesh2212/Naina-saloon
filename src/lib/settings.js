@@ -5,6 +5,8 @@ const { config } = require('../config');
 const dates = require('./dates');
 const { isValidTime, hmToMinutes } = dates;
 
+const NOW = "to_char(now(), 'YYYY-MM-DD HH24:MI:SS')";
+
 const DEFAULTS = {
   slot_step_minutes: 30,
   booking_horizon_days: 30,
@@ -26,8 +28,8 @@ const HARD_LIMITS = {
  * where a saved row beats the environment.
  *
  * `base` is the environment's answer, captured before anything is overwritten,
- * so the portal can still say which value came from `.env` and which one it is
- * holding itself.
+ * so the portal can still say which value came from the environment and which one
+ * it is holding itself.
  */
 const DETAIL_FIELDS = [
   { key: 'salon_name', field: 'name', label: 'Salon name', max: 80, required: true },
@@ -61,70 +63,80 @@ function phoneHref(phone) {
   return digits ? `+${digits}` : raw;
 }
 
-function textSetting(key, fallback) {
-  const row = db.get('SELECT value FROM settings WHERE key = ?', key);
+async function textSetting(key, fallback) {
+  const row = await db.get('SELECT value FROM settings WHERE key = ?', key);
   if (!row || row.value === null) return fallback;
   const value = String(row.value).trim();
   return value === '' ? fallback : value;
 }
 
-/** Every detail the site shows right now: stored override, else `.env`, else shipped default. */
-function salonDetails() {
+/** Every detail the site shows right now: stored override, else the environment, else shipped default. */
+async function salonDetails() {
+  // One round trip for all of them. A serverless instance starts with no open
+  // connection, so seven separate queries spend a suspended database's cold
+  // start on six connections that one SELECT does not need — and the ones that
+  // queue behind it give up before the wake finishes.
+  const keys = DETAIL_FIELDS.map((field) => field.key);
+  const rows = await db.all(
+    `SELECT key, value FROM settings WHERE key IN (${keys.map(() => '?').join(', ')})`,
+    ...keys,
+  );
+  const stored = new Map(rows.map((row) => [row.key, row.value]));
   const merged = { ...base };
-  for (const field of DETAIL_FIELDS) merged[field.field] = textSetting(field.key, base[field.field]);
+  for (const field of DETAIL_FIELDS) {
+    const raw = stored.get(field.key);
+    const value = raw === null || raw === undefined ? '' : String(raw).trim();
+    merged[field.field] = value === '' ? base[field.field] : value;
+  }
   merged.phoneHref = phoneHref(merged.phone);
   return merged;
 }
 
 /**
- * Push the stored details into `config.salon` so every reader — the mail
- * templates, the booking page, the header — picks them up without a restart.
- * Call once at boot, and again after a save.
+ * Push the stored details into `config.salon`, and pin the studio clock to the
+ * stored zone, so every reader — the mail templates, the booking page, the
+ * header — picks them up without a restart. Call once at boot, and again after a
+ * save.
  */
-function applySalonDetails() {
-  Object.assign(config.salon, salonDetails());
+async function applySalonDetails() {
+  Object.assign(config.salon, await salonDetails());
+  await applySalonZone();
   return config.salon;
 }
 
-/** Keys with a real stored override, so the portal can mark what `.env` no longer decides. */
-function savedDetailKeys() {
+async function applySalonZone() {
+  const row = await db.get('SELECT value FROM settings WHERE key = ?', dates.ZONE_KEY).catch(() => null);
+  if (row && dates.isValidTimeZone(row.value)) dates.setSalonZone(row.value);
+  return dates.salonZone();
+}
+
+/** Which details a save wrote; an empty submission clears the override back to the environment. */
+async function savedDetailKeys() {
   const wanted = DETAIL_FIELDS.map((field) => field.key);
-  const rows = db.all(
+  const rows = await db.all(
     `SELECT key FROM settings WHERE TRIM(value) <> '' AND key IN (${wanted.map(() => '?').join(', ')})`,
     ...wanted,
   );
   return new Set(rows.map((row) => row.key));
 }
 
-/** Which details a save wrote; an empty submission clears the override back to `.env`. */
-function saveSalonDetails(values) {
+async function saveSalonDetails(values) {
   const written = [];
   for (const field of DETAIL_FIELDS) {
     if (!(field.key in values)) continue;
-    setSetting(field.key, String(values[field.key] || '').trim());
+    await setSetting(field.key, String(values[field.key] || '').trim());
     written.push(field.label);
   }
-  applySalonDetails();
+  await applySalonDetails();
   return written;
 }
 
-function getSetting(key, fallback = DEFAULTS[key]) {
-  const row = db.get('SELECT value FROM settings WHERE key = ?', key);
-  if (!row) return fallback;
-  const parsed = Number.parseInt(row.value, 10);
-  if (!Number.isFinite(parsed)) return fallback;
-  const [min, max] = HARD_LIMITS[key] || [-Infinity, Infinity];
-  return Math.max(min, Math.min(max, parsed));
-}
-
-function setSetting(key, value) {
-  const now = new Date().toISOString();
-  db.run(
-    `INSERT INTO settings (key, value, updated_at) VALUES (?, ?, ?)
+async function setSetting(key, value) {
+  await db.run(
+    `INSERT INTO settings (key, value, updated_at) VALUES (?, ?, ${NOW})
      ON CONFLICT (key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`,
     key,
     String(value),
-    now,
   );
 }
 
@@ -138,17 +150,17 @@ function timeZone() {
 }
 
 /** True when the studio has actually chosen one, vs. the shipped default. */
-function hasSavedTimeZone() {
-  return Boolean(db.get('SELECT value FROM settings WHERE key = ?', dates.ZONE_KEY));
+async function hasSavedTimeZone() {
+  return Boolean(await db.get('SELECT value FROM settings WHERE key = ?', dates.ZONE_KEY));
 }
 
-function saveTimeZone(value) {
+async function saveTimeZone(value) {
   const zone = String(value || '').trim();
   if (!dates.isValidTimeZone(zone)) {
     throw new Error('Choose a time zone from the list — the studio clock has to be a real zone name.');
   }
-  db.run(
-    `INSERT INTO settings (key, value, updated_at) VALUES (?, ?, datetime('now'))
+  await db.run(
+    `INSERT INTO settings (key, value, updated_at) VALUES (?, ?, ${NOW})
      ON CONFLICT (key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`,
     dates.ZONE_KEY,
     zone,
@@ -156,12 +168,31 @@ function saveTimeZone(value) {
   return dates.setSalonZone(zone);
 }
 
-function bookingRules() {
+/**
+ * The four booking tunables in one read. The availability engine asks for all of
+ * them together on almost every request, and on a hosted database four round
+ * trips per call is the difference between a fast page and a slow one.
+ */
+async function bookingRules() {
+  const keys = Object.keys(DEFAULTS);
+  const rows = await db.all(
+    `SELECT key, value FROM settings WHERE key IN (${keys.map(() => '?').join(',')})`,
+    ...keys,
+  );
+  const stored = new Map(rows.map((row) => [row.key, row.value]));
+  const read = (key) => {
+    const fallback = DEFAULTS[key];
+    if (!stored.has(key)) return fallback;
+    const parsed = Number.parseInt(stored.get(key), 10);
+    if (!Number.isFinite(parsed)) return fallback;
+    const [min, max] = HARD_LIMITS[key] || [-Infinity, Infinity];
+    return Math.max(min, Math.min(max, parsed));
+  };
   return {
-    stepMinutes: getSetting('slot_step_minutes'),
-    horizonDays: getSetting('booking_horizon_days'),
-    leadMinutes: getSetting('lead_time_minutes'),
-    maxActivePerUser: getSetting('max_active_bookings_per_user'),
+    stepMinutes: read('slot_step_minutes'),
+    horizonDays: read('booking_horizon_days'),
+    leadMinutes: read('lead_time_minutes'),
+    maxActivePerUser: read('max_active_bookings_per_user'),
   };
 }
 
@@ -169,19 +200,16 @@ function allWeekHours() {
   return db.all('SELECT weekday, is_closed, opens_at, closes_at, note FROM opening_hours ORDER BY weekday');
 }
 
-/** Hours for one weekday index (0 = Sunday), or null when not configured. */
-function dayHours(weekday) {
-  const row = db.get(
-    'SELECT weekday, is_closed, opens_at, closes_at, note FROM opening_hours WHERE weekday = ?',
-    weekday,
-  );
+/** The row → clock shape the booking engine works in. Pure, so a batch read can reuse it. */
+function hoursFromRow(row) {
   if (!row) return null;
   const openMinutes = hmToMinutes(row.opens_at);
   const closeMinutes = hmToMinutes(row.closes_at);
   if (row.is_closed || openMinutes === null || closeMinutes === null || closeMinutes <= openMinutes) {
-    return { closed: true, opensAt: row.opens_at, closesAt: row.closes_at, note: row.note };
+    return { weekday: row.weekday, closed: true, opensAt: row.opens_at, closesAt: row.closes_at, note: row.note };
   }
   return {
+    weekday: row.weekday,
     closed: false,
     openMinutes,
     closeMinutes,
@@ -191,24 +219,39 @@ function dayHours(weekday) {
   };
 }
 
+/** All seven days in one read; a weekday with no row is absent, which means closed. */
+async function allDayHours() {
+  const rows = await allWeekHours();
+  return rows.map(hoursFromRow).filter(Boolean);
+}
+
+/** Hours for one weekday index (0 = Sunday), or null when not configured. */
+async function dayHours(weekday) {
+  const row = await db.get(
+    'SELECT weekday, is_closed, opens_at, closes_at, note FROM opening_hours WHERE weekday = ?',
+    weekday,
+  );
+  return hoursFromRow(row);
+}
+
 /** Earliest opening minute across the week — used for the public "opens at" line. */
-function earliestOpening() {
-  const rows = db.all('SELECT opens_at FROM opening_hours WHERE is_closed = 0');
+async function earliestOpening() {
+  const rows = await db.all('SELECT opens_at FROM opening_hours WHERE is_closed = 0');
   const minutes = rows.map((r) => hmToMinutes(r.opens_at)).filter((m) => m !== null);
   if (!minutes.length) return null;
   return Math.min(...minutes);
 }
 
-function saveWeekHours(weekday, { isClosed, opensAt, closesAt, note }) {
+async function saveWeekHours(weekday, { isClosed, opensAt, closesAt, note }) {
   if (!isValidTime(opensAt) || !isValidTime(closesAt)) {
     throw new Error('Times must be in 24-hour HH:MM form, e.g. 09:00');
   }
   if (!isClosed && hmToMinutes(closesAt) <= hmToMinutes(opensAt)) {
     throw new Error('Closing time must be later than the opening time.');
   }
-  db.run(
+  await db.run(
     `INSERT INTO opening_hours (weekday, is_closed, opens_at, closes_at, note, updated_at)
-     VALUES (?, ?, ?, ?, ?, datetime('now'))
+     VALUES (?, ?, ?, ?, ?, ${NOW})
      ON CONFLICT (weekday) DO UPDATE SET
        is_closed = excluded.is_closed,
        opens_at = excluded.opens_at,
@@ -254,16 +297,17 @@ module.exports = {
   DEFAULTS,
   HARD_LIMITS,
   DETAIL_FIELDS,
-  getSetting,
   setSetting,
   baseDetail,
   phoneHref,
   salonDetails,
   applySalonDetails,
+  applySalonZone,
   savedDetailKeys,
   saveSalonDetails,
   bookingRules,
   allWeekHours,
+  allDayHours,
   dayHours,
   earliestOpening,
   saveWeekHours,

@@ -8,10 +8,10 @@
  */
 const readline = require('node:readline/promises');
 const { stdin, stdout } = require('node:process');
-const { config } = require('../src/config');
 const db = require('../src/db');
 const { migrate } = require('../src/db/migrate');
 const users = require('../src/lib/users');
+const studio = require('../src/lib/settings');
 const v = require('../src/lib/validate');
 
 const isInteractive = Boolean(stdin.isTTY) && process.argv.indexOf('--non-interactive') === -1;
@@ -70,11 +70,11 @@ async function askSecret(rl) {
 }
 
 async function main() {
-  migrate({ log: () => {} });
+  await migrate({ log: () => {} });
+  await studio.applySalonZone();
 
   stdout.write('\nSalon staff login for Naina Beauty Parlour\n');
-  stdout.write(`Database: ${config.db.file}\n`);
-  const admins = users.countAdmins();
+  const admins = await users.countAdmins();
   stdout.write(admins ? `${admins} staff account(s) already exist.\n` : 'No staff account exists yet.\n');
 
   const rl = readline.createInterface({ input: stdin, output: stdout });
@@ -103,7 +103,8 @@ async function main() {
     process.exitCode = 1;
   } finally {
     rl.close();
-    db.closeDatabase();
+    // The pool keeps the event loop alive until it is closed.
+    await db.closeDatabase();
   }
 }
 

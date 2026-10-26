@@ -26,6 +26,9 @@ const TICKET_DIR = path.join(config.uploads.dir, 'tickets');
 const URL_PREFIX = '/uploads/tickets';
 const ART_DIR = path.join(config.root, 'public', 'assets', 'art');
 
+// Stamps keep the exact text shape src/lib/dates.js parses.
+const NOW = "to_char(now(), 'YYYY-MM-DD HH24:MI:SS')";
+
 const PAGE_W = 560;
 const PAGE_H = 300;
 const STUB_X = 410;
@@ -64,7 +67,7 @@ function safe(value, max = 120) {
 }
 
 /** Everything the ticket prints, read from the booking and its account right now. */
-function ticketRow(bookingId) {
+async function ticketRow(bookingId) {
   return db.get(
     `SELECT b.id, b.user_id, b.status, b.note, b.staff_note, b.contact_name, b.contact_phone, b.preferred_title,
             b.created_at, b.staff_action_at, b.ticket_path, b.ticket_issued_at,
@@ -136,7 +139,7 @@ function spaced(text) {
 }
 
 async function renderTicket(booking) {
-  const salon = require('./settings').salonDetails();
+  const salon = await require('./settings').salonDetails();
   const doc = await PDFDocument.create();
   doc.setTitle(`Naina Beauty Parlour — appointment #${booking.id}`);
   doc.setAuthor(salon.name);
@@ -301,7 +304,7 @@ async function embedUpload(doc, photoPath) {
  * or cancelled has no ticket and gets nothing here; the caller checks ownership.
  */
 async function ensure(bookingId) {
-  const booking = ticketRow(bookingId);
+  const booking = await ticketRow(bookingId);
   if (!booking) return { ok: false, reason: 'not-found' };
   if (!TICKET_STATUSES.includes(booking.status)) return { ok: false, reason: 'not-confirmed', booking };
 
@@ -312,13 +315,13 @@ async function ensure(bookingId) {
     const bytes = await renderTicket(booking);
     fs.mkdirSync(TICKET_DIR, { recursive: true });
     fs.writeFileSync(target, bytes, { mode: 0o644 });
-    db.run(
-      "UPDATE bookings SET ticket_path = ?, ticket_issued_at = COALESCE(ticket_issued_at, datetime('now')), updated_at = datetime('now') WHERE id = ?",
+    await db.run(
+      `UPDATE bookings SET ticket_path = ?, ticket_issued_at = COALESCE(ticket_issued_at, ${NOW}), updated_at = ${NOW} WHERE id = ?`,
       urlPath,
       booking.id,
     );
   }
-  return { ok: true, booking: ticketRow(bookingId), file: target, urlPath };
+  return { ok: true, booking: await ticketRow(bookingId), file: target, urlPath };
 }
 
 /** Called by the portal when staff confirm a request. */

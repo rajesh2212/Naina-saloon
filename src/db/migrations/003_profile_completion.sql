@@ -8,9 +8,9 @@
 -- serves — the exact spellings are the ones shown in the dropdown, and a value
 -- outside the list is refused by the database as well as by the form.
 --
--- `photo_path` is only ever a path inside uploads/avatars — outside public/, so
--- the static mount cannot serve it — written by src/lib/uploads.js. The image
--- bytes stay on disk; the row holds where they are.
+-- `photo_path` is only ever a key inside the private Blob store's avatars
+-- prefix, written by src/lib/uploads.js. The bytes live in storage; the row
+-- holds where they are, and no route serves one without checking its owner.
 
 ALTER TABLE users ADD COLUMN age INTEGER CHECK (age IS NULL OR (age BETWEEN 1 AND 120));
 ALTER TABLE users ADD COLUMN address TEXT;

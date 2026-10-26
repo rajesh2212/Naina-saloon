@@ -6,12 +6,15 @@
  * it and no booking holds it, so `bookings` stays the single source of truth.
  * `bookings.slot_id` carries a partial unique index over the holding statuses
  * that makes a second booking for the same time impossible at the database
- * level, and every write here runs inside BEGIN IMMEDIATE.
+ * level; the transaction around `createBooking` is what keeps the checks and the
+ * write in one snapshot.
  */
 const db = require('../db');
 const dates = require('./dates');
 const studio = require('./settings');
 const { HttpError } = require('./async');
+
+const NOW = "to_char(now(), 'YYYY-MM-DD HH24:MI:SS')";
 
 /** Still open for the customer: counts against their limit, cancellable. */
 const ACTIVE_STATUSES = ['pending', 'confirmed'];
@@ -27,13 +30,12 @@ const HOLD_STATUSES = ['pending', 'confirmed', 'completed'];
 const HOLD_SQL = HOLD_STATUSES.map(() => '?').join(',');
 
 function getService(serviceId, { bookableOnly = true } = {}) {
-  const row = db.get(
+  return db.get(
     `SELECT s.*, c.name AS category_name, c.slug AS category_slug
      FROM services s JOIN service_categories c ON c.id = s.category_id
      WHERE s.id = ? AND s.is_active = 1${bookableOnly ? ' AND s.is_bookable = 1' : ''}`,
     serviceId,
   );
-  return row || null;
 }
 
 /** Steps between opening and closing that leave room for `durationMinutes`. */
@@ -50,22 +52,17 @@ function slotStarts({ openMinutes, closeMinutes, durationMinutes, stepMinutes, n
  * Create the slot rows for a date if they are missing. Idempotent; safe to call
  * on every availability request.
  */
-function ensureDateSlots(dateStr, { force = false } = {}) {
+async function ensureDateSlots(dateStr, { force = false } = {}) {
   if (!dates.isValidDate(dateStr)) throw new HttpError(400, 'Choose a valid date.');
-  const rules = studio.bookingRules();
+  const rules = await studio.bookingRules();
   const today = dates.salonClock().date;
   if (dateStr < today) return { closed: false, past: true, created: 0, date: dateStr };
   const offset = dates.daysBetween(today, dateStr);
   if (offset > rules.horizonDays) {
     return { closed: false, beyondHorizon: true, created: 0, date: dateStr };
   }
-  const hours = studio.dayHours(dates.weekdayOf(dateStr));
+  const hours = await studio.dayHours(dates.weekdayOf(dateStr));
   if (!hours || hours.closed) return { closed: true, created: 0, date: dateStr, hours };
-
-  if (!force) {
-    const existing = db.get('SELECT COUNT(*) AS n FROM slots WHERE slot_date = ?', dateStr);
-    if (existing && existing.n > 0) return { closed: false, created: 0, date: dateStr, hours };
-  }
 
   const starts = slotStarts({
     openMinutes: hours.openMinutes,
@@ -74,12 +71,18 @@ function ensureDateSlots(dateStr, { force = false } = {}) {
     stepMinutes: rules.stepMinutes,
   });
 
-  db.transaction(() => {
-    const insert = db.getDb().prepare(
-      'INSERT OR IGNORE INTO slots (slot_date, start_time) VALUES (?, ?)',
+  if (!force) {
+    const existing = await db.get('SELECT 1 AS hit FROM slots WHERE slot_date = ? LIMIT 1', dateStr);
+    if (existing) return { closed: false, created: 0, date: dateStr, hours };
+  }
+
+  if (starts.length) {
+    await db.run(
+      `INSERT INTO slots (slot_date, start_time) VALUES ${starts.map(() => '(?, ?)').join(', ')}
+       ON CONFLICT (slot_date, start_time) DO NOTHING`,
+      ...starts.flatMap((start) => [dateStr, start]),
     );
-    for (const start of starts) insert.run(dateStr, start);
-  });
+  }
 
   return { closed: false, created: starts.length, date: dateStr, hours };
 }
@@ -96,28 +99,74 @@ function notBeforeMinutesFor(dateStr, leadMinutes) {
  * move between its own statuses (pending -> confirmed) without clashing with
  * itself. Statuses that hold: see HOLD_STATUSES.
  */
-function slotIsHeld(slotId, exceptBookingId = null) {
-  return Boolean(
-    db.get(
-      `SELECT 1 AS hit FROM bookings
-       WHERE slot_id = ? AND id IS NOT ? AND status IN (${HOLD_SQL})`,
-      slotId,
-      exceptBookingId,
+async function slotIsHeld(slotId, exceptBookingId = null) {
+  const row = exceptBookingId
+    ? await db.get(
+        `SELECT 1 AS hit FROM bookings WHERE slot_id = ? AND id <> ? AND status IN (${HOLD_SQL})`,
+        slotId,
+        exceptBookingId,
+        ...HOLD_STATUSES,
+      )
+    : await db.get(
+        `SELECT 1 AS hit FROM bookings WHERE slot_id = ? AND status IN (${HOLD_SQL})`,
+        slotId,
+        ...HOLD_STATUSES,
+      );
+  return Boolean(row);
+}
+
+/**
+ * The studio's hours for the week and every blocked or held time inside a date
+ * range, in three reads. Both the date strip and the home page's "open times"
+ * figure are worked out from these rather than one query per day — the window is
+ * a fortnight wide and a hosted database makes per-day reads cost seconds.
+ */
+async function windowFacts(start, end) {
+  const [weekHours, blockedRows, heldRows] = await Promise.all([
+    studio.allDayHours(),
+    db.all(
+      "SELECT slot_date, start_time FROM slots WHERE slot_date >= ? AND slot_date <= ? AND status = 'blocked'",
+      start,
+      end,
+    ),
+    db.all(
+      `SELECT s.slot_date, s.start_time
+       FROM slots s JOIN bookings b ON b.slot_id = s.id
+       WHERE s.slot_date >= ? AND s.slot_date <= ? AND b.status IN (${HOLD_SQL})`,
+      start,
+      end,
       ...HOLD_STATUSES,
     ),
-  );
+  ]);
+  return {
+    hoursByWeekday: new Map(weekHours.map((entry) => [entry.weekday, entry])),
+    taken: new Set([...blockedRows, ...heldRows].map((row) => `${row.slot_date} ${row.start_time}`)),
+  };
+}
+
+/** Start times on one date that are inside the hours, long enough, and free. */
+function freeStartsOn(date, { rules, hours, taken, durationMinutes }) {
+  if (!hours || hours.closed) return [];
+  const notBefore = notBeforeMinutesFor(date, rules.leadMinutes);
+  return slotStarts({
+    openMinutes: hours.openMinutes,
+    closeMinutes: hours.closeMinutes,
+    durationMinutes,
+    stepMinutes: rules.stepMinutes,
+    notBeforeMinutes: notBefore,
+  }).filter((startTime) => !taken.has(`${date} ${startTime}`));
 }
 
 /**
  * Slots a customer can actually take for one service on one date: inside the
  * studio's hours, long enough for the service, past the notice period, free.
  */
-function availableSlots(serviceId, dateStr) {
-  const service = getService(serviceId);
+async function availableSlots(serviceId, dateStr) {
+  const service = await getService(serviceId);
   if (!service) throw new HttpError(404, 'That service is not available for booking.');
 
-  const rules = studio.bookingRules();
-  const prepared = ensureDateSlots(dateStr);
+  const rules = await studio.bookingRules();
+  const prepared = await ensureDateSlots(dateStr);
   if (prepared.past) return { service, date: dateStr, slots: [], notice: 'That date has already passed.' };
   if (prepared.beyondHorizon) {
     return { service, date: dateStr, slots: [], notice: `The studio publishes dates ${rules.horizonDays} days ahead.` };
@@ -128,7 +177,7 @@ function availableSlots(serviceId, dateStr) {
 
   const hours = prepared.hours;
   const notBefore = notBeforeMinutesFor(dateStr, rules.leadMinutes);
-  const rows = db.all(
+  const rows = await db.all(
     `SELECT s.id, s.start_time, s.status
      FROM slots s
      WHERE s.slot_date = ? AND s.status = 'open'
@@ -171,54 +220,100 @@ function availableSlots(serviceId, dateStr) {
   };
 }
 
-/** Slot counts per date, used by the date strip. */
-function availabilityCalendar(serviceId, { days = null, from = null } = {}) {
-  const service = getService(serviceId);
+/**
+ * Slot counts per date, used by the date strip.
+ */
+async function availabilityCalendar(serviceId, { days = null, from = null } = {}) {
+  const service = await getService(serviceId);
   if (!service) throw new HttpError(404, 'Service not found.');
-  const rules = studio.bookingRules();
+  const rules = await studio.bookingRules();
   const horizon = days || rules.horizonDays;
   const start = from || dates.salonClock().date;
+  const end = dates.addDays(start, horizon - 1);
+  const { hoursByWeekday, taken } = await windowFacts(start, end);
+  const today = dates.salonClock().date;
+
   const out = [];
   for (let i = 0; i < horizon; i += 1) {
     const date = dates.addDays(start, i);
-    const { slots, notice } = availableSlots(serviceId, date);
-    out.push({ date, count: slots.length, first: slots[0] || null, notice });
+    const hours = hoursByWeekday.get(dates.weekdayOf(date));
+    const starts = freeStartsOn(date, { rules, hours, taken, durationMinutes: service.duration_minutes });
+    const slots = starts.map((startTime) => ({
+      startTime,
+      endTime: dates.minutesToHm(dates.hmToMinutes(startTime) + service.duration_minutes),
+      label: dates.formatTime12(startTime),
+      range: dates.formatRange(startTime, service.duration_minutes),
+    }));
+    out.push({
+      date,
+      count: slots.length,
+      first: slots[0] || null,
+      notice: slots.length
+        ? null
+        : !hours || hours.closed
+          ? 'The studio is closed on that day.'
+          : date < today
+            ? 'That date has already passed.'
+            : 'No free times left for that day.',
+    });
   }
   return out;
 }
 
-function activeBookingCount(userId) {
-  return Number(
-    db.get(
-      `SELECT COUNT(*) AS n FROM bookings WHERE user_id = ? AND status IN (${ACTIVE_SQL})`,
-      userId,
-      ...ACTIVE_STATUSES,
-    ).n || 0,
+/**
+ * How many times the diary is genuinely open for booking in the next `days`
+ * days — the figure on the home page. Counted from the studio's hours minus
+ * what is blocked or held, so it does not have to create slot rows to count them.
+ */
+async function openTimesAhead(days) {
+  const rules = await studio.bookingRules();
+  const today = dates.salonClock().date;
+  const end = dates.addDays(today, days);
+  const { hoursByWeekday, taken } = await windowFacts(dates.addDays(today, 1), end);
+  let total = 0;
+  for (let i = 1; i <= days; i += 1) {
+    const date = dates.addDays(today, i);
+    total += freeStartsOn(date, {
+      rules,
+      hours: hoursByWeekday.get(dates.weekdayOf(date)),
+      taken,
+      durationMinutes: 0,
+    }).length;
+  }
+  return total;
+}
+
+async function activeBookingCount(userId) {
+  const row = await db.get(
+    `SELECT COUNT(*) AS n FROM bookings WHERE user_id = ? AND status IN (${ACTIVE_SQL})`,
+    userId,
+    ...ACTIVE_STATUSES,
   );
+  return Number(row.n || 0);
 }
 
 /**
- * Book a slot. Runs in one immediate transaction; the unique index is the last
- * line of defence if two requests race past the readability checks.
+ * Book a slot. Runs in one transaction; the unique index is the last line of
+ * defence if two requests race past the readability checks, and its clash
+ * (23505) is turned back into the same message the checks give.
  */
 function createBooking({ userId, serviceId, slotId, contactName, contactPhone, preferredTitle, note }) {
-  const rules = studio.bookingRules();
-
-  return db.transaction(() => {
-    const service = getService(serviceId);
+  return db.transaction(async () => {
+    const rules = await studio.bookingRules();
+    const service = await getService(serviceId);
     if (!service) throw new HttpError(400, 'Please choose a service.');
 
-    const user = db.get('SELECT id, name, phone, preferred_title FROM users WHERE id = ? AND is_active = 1', userId);
+    const user = await db.get('SELECT id, name, phone, preferred_title FROM users WHERE id = ? AND is_active = 1', userId);
     if (!user) throw new HttpError(401, 'Please sign in again.');
 
-    if (activeBookingCount(userId) >= rules.maxActivePerUser) {
+    if ((await activeBookingCount(userId)) >= rules.maxActivePerUser) {
       throw new HttpError(409, `You already have ${rules.maxActivePerUser} open bookings. Please let the studio confirm one first.`);
     }
 
-    const slot = db.get('SELECT id, slot_date, start_time, status FROM slots WHERE id = ?', slotId);
+    const slot = await db.get('SELECT id, slot_date, start_time, status FROM slots WHERE id = ?', slotId);
     if (!slot) throw new HttpError(400, 'That appointment time is no longer listed. Please choose again.');
 
-    const hours = studio.dayHours(dates.weekdayOf(slot.slot_date));
+    const hours = await studio.dayHours(dates.weekdayOf(slot.slot_date));
     if (!hours || hours.closed) throw new HttpError(409, 'The studio has closed that day. Please choose another date.');
 
     const startMinutes = dates.hmToMinutes(slot.start_time);
@@ -238,11 +333,11 @@ function createBooking({ userId, serviceId, slotId, contactName, contactPhone, p
     }
 
     if (slot.status !== 'open') throw new HttpError(409, 'That slot is blocked by the studio. Please choose another time.');
-    if (slotIsHeld(slot.id)) {
+    if (await slotIsHeld(slot.id)) {
       throw new HttpError(409, 'Someone has just taken that slot. Please pick another time.');
     }
 
-    const insert = db.run(
+    const result = await db.insert(
       `INSERT INTO bookings
         (slot_id, user_id, service_id, status, contact_name, contact_phone, preferred_title, note)
        VALUES (?, ?, ?, 'pending', ?, ?, ?, ?)`,
@@ -255,9 +350,12 @@ function createBooking({ userId, serviceId, slotId, contactName, contactPhone, p
       note || null,
     );
 
-    const booking = bookingById(insert.lastInsertRowid);
+    const booking = await bookingById(result.id);
     if (!booking) throw new HttpError(500, 'Could not read back the booking.');
     return booking;
+  }).catch((error) => {
+    if (db.isConflict(error)) throw new HttpError(409, 'Someone has just taken that slot. Please pick another time.');
+    throw error;
   });
 }
 
@@ -293,17 +391,14 @@ function listUserBookings(userId) {
 }
 
 function cancelBooking({ bookingId, userId }) {
-  return db.transaction(() => {
-    const booking = db.get('SELECT id, user_id, status, slot_id FROM bookings WHERE id = ?', bookingId);
+  return db.transaction(async () => {
+    const booking = await db.get('SELECT id, user_id, status, slot_id FROM bookings WHERE id = ?', bookingId);
     if (!booking) throw new HttpError(404, 'Booking not found.');
     if (userId !== null && booking.user_id !== userId) throw new HttpError(403, 'That booking belongs to another account.');
     if (!ACTIVE_STATUSES.includes(booking.status)) {
       throw new HttpError(409, `This request is already ${booking.status}.`);
     }
-    db.run(
-      `UPDATE bookings SET status = 'cancelled', updated_at = datetime('now') WHERE id = ?`,
-      bookingId,
-    );
+    await db.run(`UPDATE bookings SET status = 'cancelled', updated_at = ${NOW} WHERE id = ?`, bookingId);
     return bookingById(bookingId);
   });
 }
@@ -316,38 +411,46 @@ function setBookingStatus({ bookingId, status, staffNote }) {
   if (!BOOKING_STATUSES.includes(status)) {
     throw new HttpError(400, 'Unknown booking status.');
   }
-  return db.transaction(() => {
-    const booking = db.get('SELECT id, status, slot_id FROM bookings WHERE id = ?', bookingId);
+  return db.transaction(async () => {
+    const booking = await db.get('SELECT id, status, slot_id FROM bookings WHERE id = ?', bookingId);
     if (!booking) throw new HttpError(404, 'Booking not found.');
 
     if (HOLD_STATUSES.includes(status)) {
-      if (slotIsHeld(booking.slot_id, booking.id)) {
+      if (await slotIsHeld(booking.slot_id, booking.id)) {
         throw new HttpError(409, 'Another booking already holds that time. Resolve it first.');
       }
     }
-    db.run(
+    await db.run(
       `UPDATE bookings
-       SET status = ?, staff_note = COALESCE(?, staff_note), staff_action_at = datetime('now'),
-           updated_at = datetime('now')
+       SET status = ?, staff_note = COALESCE(?, staff_note), staff_action_at = ${NOW},
+           updated_at = ${NOW}
        WHERE id = ?`,
       status,
       staffNote ?? null,
       bookingId,
     );
     return bookingById(bookingId);
+  }).catch((error) => {
+    if (db.isConflict(error)) throw new HttpError(409, 'Another booking already holds that time. Resolve it first.');
+    throw error;
   });
 }
 
 function blockSlot({ date, time, blocked, reason }) {
   if (!dates.isValidDate(date) || !dates.isValidTime(time)) throw new HttpError(400, 'Pick a valid day and time first.');
-  return db.transaction(() => {
-    ensureDateSlots(date, { force: true });
-    const slot = db.get('SELECT id, status FROM slots WHERE slot_date = ? AND start_time = ?', date, time);
+  return db.transaction(async () => {
+    await ensureDateSlots(date, { force: true });
+    const slot = await db.get('SELECT id, status FROM slots WHERE slot_date = ? AND start_time = ?', date, time);
     if (!slot) throw new HttpError(404, 'That slot does not exist on this date.');
-    if (blocked && slotIsHeld(slot.id)) {
+    if (blocked && (await slotIsHeld(slot.id))) {
       throw new HttpError(409, 'That time is already held by a booking. Cancel or move it first.');
     }
-    db.run('UPDATE slots SET status = ?, block_reason = ? WHERE id = ?', blocked ? 'blocked' : 'open', blocked ? reason || 'Blocked by the studio' : null, slot.id);
+    await db.run(
+      'UPDATE slots SET status = ?, block_reason = ? WHERE id = ?',
+      blocked ? 'blocked' : 'open',
+      blocked ? reason || 'Blocked by the studio' : null,
+      slot.id,
+    );
     return slot.id;
   });
 }
@@ -361,7 +464,7 @@ function dayBookings(dateStr) {
      JOIN slots s ON s.id = b.slot_id
      JOIN services sv ON sv.id = b.service_id
      JOIN users u ON u.id = b.user_id
-     WHERE s.slot_date = ? AND b.status IN ('pending','confirmed','completed','rejected','cancelled')
+     WHERE s.slot_date = ?
      ORDER BY s.start_time`,
     dateStr,
   );
@@ -376,6 +479,7 @@ module.exports = {
   ensureDateSlots,
   availableSlots,
   availabilityCalendar,
+  openTimesAhead,
   createBooking,
   bookingById,
   listUserBookings,

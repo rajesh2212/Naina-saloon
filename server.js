@@ -17,19 +17,19 @@ function banner() {
   console.log(`  captcha       : ${info.captchaProvider}`);
   console.log(`  email         : ${info.mailEnabled ? 'SMTP configured' : info.mailDevOutbox === 'file' ? 'dev outbox only' : 'NOT CONFIGURED'}`);
   console.log(`  photographs   : ${info.photos.present}/${info.photos.total} slots hold a real photo, ${info.photos.illustrative} show tagged artwork${info.photos.empty ? `, ${info.photos.empty} empty` : ''}`);
-  if (!info.envFileLoaded) console.warn('  ! no .env file found — using defaults (copy .env.example to .env)');
+  if (!info.envFileLoaded) console.warn('  ! no .env or .env.local file found — using defaults (copy .env.example to .env)');
   if (!info.sessionSecretSet && config.isProd) console.warn('  ! SESSION_SECRET is not set');
 }
 
-function main() {
-  const applied = migrate({ log: (line) => console.log(`  migration ${line}`) });
+async function main() {
+  const applied = await migrate({ log: (line) => console.log(`  migration ${line}`) });
   if (applied.length) console.log(`  ${applied.length} migration(s) applied`);
 
-  // A deployed container starts against a volume that has never held a database,
+  // A deployed container starts against a database that has never held a row,
   // and a site with no catalogue is worse than one that took a second longer to
   // boot. seed() only ever writes a row that is missing, so a studio's own edits
   // in /portal are never overwritten by a restart.
-  const seeded = seed({ log: () => {} });
+  const seeded = await seed({ log: () => {} });
   const added = seeded.settings + seeded.hours + seeded.catalogue.categories + seeded.catalogue.services;
   if (added) {
     console.log(
@@ -39,12 +39,12 @@ function main() {
   }
 
   // Business details saved in the staff portal win over SALON_* in .env.
-  const saved = studio.savedDetailKeys();
-  studio.applySalonDetails();
+  const saved = await studio.savedDetailKeys();
+  await studio.applySalonDetails();
   if (saved.size) {
     console.log(`  details       : ${saved.size} SALON_* value(s) come from the portal, not .env`);
   }
-  if (!db.get("SELECT name FROM sqlite_master WHERE type='table' AND name='service_categories'")) {
+  if (!(await db.get("SELECT to_regclass('service_categories') AS name"))) {
     console.error('  ! schema missing — run: npm run db:setup');
   }
 
@@ -56,8 +56,8 @@ function main() {
 
   const shutdown = (signal) => {
     console.log(`\n  ${signal} received, closing.`);
-    server.close(() => {
-      db.closeDatabase();
+    server.close(async () => {
+      await db.closeDatabase();
       process.exit(0);
     });
   };
@@ -65,4 +65,7 @@ function main() {
   process.on('SIGTERM', () => shutdown('SIGTERM'));
 }
 
-main();
+main().catch((error) => {
+  console.error('Startup failed:', error.message);
+  process.exitCode = 1;
+});

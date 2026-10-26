@@ -15,6 +15,9 @@ const slots = require('./slots');
 const STATUSES = slots.BOOKING_STATUSES;
 const PER_PAGE = 25;
 
+/** Age windows, as text stamps — `created_at` and friends are stored as UTC text. */
+const daysAgo = (days) => `to_char(now() - interval '${days} days', 'YYYY-MM-DD HH24:MI:SS')`;
+
 const BOOKING_FROM = `
   FROM bookings b
   JOIN slots s ON s.id = b.slot_id
@@ -77,7 +80,7 @@ function whereSql(clauses) {
  * the client booked under, their phone (with or without spaces), the account
  * email, the service, either note, or the booking number.
  */
-function searchBookings({ term = '', status = 'all', from = '', to = '', sort = 'newest', page = 1, perPage = PER_PAGE } = {}) {
+async function searchBookings({ term = '', status = 'all', from = '', to = '', sort = 'newest', page = 1, perPage = PER_PAGE } = {}) {
   const clauses = [];
   const params = [];
 
@@ -117,13 +120,13 @@ function searchBookings({ term = '', status = 'all', from = '', to = '', sort = 
   }
 
   const where = whereSql(clauses);
-  const totalRow = db.get(`SELECT COUNT(*) AS n${BOOKING_FROM}${where}`, ...params);
+  const totalRow = await db.get(`SELECT COUNT(*) AS n${BOOKING_FROM}${where}`, ...params);
   const total = Number(totalRow ? totalRow.n : 0);
   const size = Math.max(5, Math.min(100, Number(perPage) || PER_PAGE));
   const pages = Math.max(1, Math.ceil(total / size));
   const current = Math.min(Math.max(1, Number(page) || 1), pages);
 
-  const rows = db.all(
+  const rows = await db.all(
     `${BOOKING_COLUMNS}${where} ${SORTS[sort] || SORTS.newest} LIMIT ? OFFSET ?`,
     ...params,
     size,
@@ -146,14 +149,14 @@ function searchBookings({ term = '', status = 'all', from = '', to = '', sort = 
   };
 }
 
-function bookingForStaff(id) {
-  const row = db.get(`${BOOKING_COLUMNS} WHERE b.id = ?`, Number(id));
+async function bookingForStaff(id) {
+  const row = await db.get(`${BOOKING_COLUMNS} WHERE b.id = ?`, Number(id));
   return row ? decorate(row) : null;
 }
 
 /** One number per status, plus the total — used by tabs and the dashboard. */
-function statusCounts() {
-  const rows = db.all('SELECT status, COUNT(*) AS n FROM bookings GROUP BY status');
+async function statusCounts() {
+  const rows = await db.all('SELECT status, COUNT(*) AS n FROM bookings GROUP BY status');
   const counts = { all: 0 };
   for (const status of STATUSES) counts[status] = 0;
   for (const row of rows) {
@@ -167,38 +170,47 @@ function statusCounts() {
  * Numbers for the dashboard. Every figure is a real count from the live
  * database; nothing here is estimated and nothing is invented.
  */
-function dashboardSnapshot() {
+async function dashboardSnapshot() {
   const today = dates.salonClock().date;
   const weekAhead = dates.addDays(today, 6);
   const weekBehind = dates.addDays(today, -6);
 
-  return {
-    day: today,
-    counts: statusCounts(),
-    todayBookings: slots.dayBookings(today).map(decorate),
-    upcomingConfirmed: db.all(
+  const [counts, dayRows, upcomingConfirmed, waiting, servedThisWeek, requestsThisWeek, signedInRecently, accounts, staffAccounts, oldestWait] = await Promise.all([
+    statusCounts(),
+    slots.dayBookings(today),
+    db.all(
       `${BOOKING_COLUMNS} WHERE b.status = 'confirmed' AND s.slot_date BETWEEN ? AND ?
        ORDER BY s.slot_date, s.start_time LIMIT 12`,
       today,
       weekAhead,
-    ).map(decorate),
-    waiting: db.all(`${BOOKING_COLUMNS} WHERE b.status = 'pending' ORDER BY b.created_at ASC LIMIT 8`).map(decorate),
-    servedThisWeek: Number(db.get(
+    ),
+    db.all(`${BOOKING_COLUMNS} WHERE b.status = 'pending' ORDER BY b.created_at ASC LIMIT 8`),
+    db.get(
       `SELECT COUNT(*) AS n FROM bookings b JOIN slots s ON s.id = b.slot_id
        WHERE b.status = 'completed' AND s.slot_date BETWEEN ? AND ?`,
       weekBehind, today,
-    ).n),
-    requestsThisWeek: Number(db.get(
-      "SELECT COUNT(*) AS n FROM bookings WHERE created_at >= datetime('now', '-7 days')",
-    ).n),
-    signedInRecently: Number(db.get(
-      "SELECT COUNT(*) AS n FROM users WHERE role = 'customer' AND last_login_at >= datetime('now', '-30 days')",
-    ).n),
-    accounts: Number(db.get("SELECT COUNT(*) AS n FROM users WHERE role = 'customer'").n),
-    staffAccounts: Number(db.get("SELECT COUNT(*) AS n FROM users WHERE role = 'admin' AND is_active = 1").n),
-    oldestWait: db.get(
-      "SELECT b.id, b.created_at, s.slot_date FROM bookings b JOIN slots s ON s.id = b.slot_id WHERE b.status = 'pending' ORDER BY b.created_at ASC LIMIT 1",
     ),
+    db.get(`SELECT COUNT(*) AS n FROM bookings WHERE created_at >= ${daysAgo(7)}`),
+    db.get(`SELECT COUNT(*) AS n FROM users WHERE role = 'customer' AND last_login_at >= ${daysAgo(30)}`),
+    db.get("SELECT COUNT(*) AS n FROM users WHERE role = 'customer'"),
+    db.get("SELECT COUNT(*) AS n FROM users WHERE role = 'admin' AND is_active = 1"),
+    db.get(
+      'SELECT b.id, b.created_at, s.slot_date FROM bookings b JOIN slots s ON s.id = b.slot_id WHERE b.status = \'pending\' ORDER BY b.created_at ASC LIMIT 1',
+    ),
+  ]);
+
+  return {
+    day: today,
+    counts,
+    todayBookings: dayRows.map(decorate),
+    upcomingConfirmed: upcomingConfirmed.map(decorate),
+    waiting: waiting.map(decorate),
+    servedThisWeek: Number(servedThisWeek.n),
+    requestsThisWeek: Number(requestsThisWeek.n),
+    signedInRecently: Number(signedInRecently.n),
+    accounts: Number(accounts.n),
+    staffAccounts: Number(staffAccounts.n),
+    oldestWait,
   };
 }
 
@@ -217,7 +229,7 @@ const CUSTOMER_COLUMNS = `
 const CUSTOMER_SORTS = {
   recent: 'ORDER BY (u.last_login_at IS NULL), u.last_login_at DESC, u.id DESC',
   earliest: 'ORDER BY u.created_at ASC, u.id ASC',
-  name: 'ORDER BY u.name COLLATE NOCASE ASC',
+  name: 'ORDER BY LOWER(u.name) ASC',
   bookings: 'ORDER BY booking_count DESC, (u.last_login_at IS NULL), u.last_login_at DESC',
 };
 
@@ -226,7 +238,7 @@ const CUSTOMER_SORTS = {
  * password column is not in the select list at all.
  * `today` is bound once for the next-appointment subquery.
  */
-function searchCustomers({ term = '', filter = 'all', sort = 'recent', page = 1, perPage = PER_PAGE } = {}) {
+async function searchCustomers({ term = '', filter = 'all', sort = 'recent', page = 1, perPage = PER_PAGE } = {}) {
   const today = dates.salonClock().date;
   const clauses = [];
   const params = [today]; // first positional belongs to the SELECT subquery
@@ -251,20 +263,20 @@ function searchCustomers({ term = '', filter = 'all', sort = 'recent', page = 1,
     never: 'u.last_login_at IS NULL',
     open_bookings: "(SELECT COUNT(*) FROM bookings b WHERE b.user_id = u.id AND b.status IN ('pending','confirmed')) > 0",
     served: "u.id IN (SELECT b.user_id FROM bookings b WHERE b.status = 'completed')",
-    silent: "u.last_login_at IS NOT NULL AND u.last_login_at < datetime('now', '-180 days')",
+    silent: `u.last_login_at IS NOT NULL AND u.last_login_at < ${daysAgo(180)}`,
     staff: "u.role = 'admin'",
   };
   const picked = filters[filter] ? filter : 'all';
   if (filters[picked]) clauses.push(filters[picked]);
 
   const where = whereSql(clauses);
-  const totalRow = db.get(`SELECT COUNT(*) AS n FROM users u${where}`, ...params.slice(1));
+  const totalRow = await db.get(`SELECT COUNT(*) AS n FROM users u${where}`, ...params.slice(1));
   const total = Number(totalRow ? totalRow.n : 0);
   const size = Math.max(5, Math.min(100, Number(perPage) || PER_PAGE));
   const pages = Math.max(1, Math.ceil(total / size));
   const current = Math.min(Math.max(1, Number(page) || 1), pages);
 
-  const rows = db.all(
+  const rows = await db.all(
     `${CUSTOMER_COLUMNS}${where} ${CUSTOMER_SORTS[sort] || CUSTOMER_SORTS.recent} LIMIT ? OFFSET ?`,
     ...params,
     size,
@@ -296,16 +308,16 @@ function searchCustomers({ term = '', filter = 'all', sort = 'recent', page = 1,
 }
 
 /** One account: the studio-visible profile plus the whole diary history. */
-function customerForStaff(id) {
+async function customerForStaff(id) {
   const userId = Number(id);
-  const user = db.get(
+  const user = await db.get(
     `SELECT id, name, email, phone, preferred_title, notes, role, is_active, created_at, last_login_at
      FROM users WHERE id = ?`,
     userId,
   );
   if (!user) return null;
 
-  const bookings = db.all(
+  const rawBookings = await db.all(
     `SELECT b.id, b.status, b.contact_name, b.contact_phone, b.preferred_title, b.note, b.staff_note,
             b.created_at, b.staff_action_at, b.slot_id, b.service_id, s.slot_date, s.start_time,
             sv.name AS service_name, sv.duration_minutes, c.name AS category_name
@@ -317,7 +329,8 @@ function customerForStaff(id) {
      ORDER BY s.slot_date DESC, s.start_time DESC
      LIMIT 200`,
     userId,
-  ).map((row) => decorate({ ...row, slot_status: null, block_reason: null, user_email: user.email, user_role: user.role }));
+  );
+  const bookings = rawBookings.map((row) => decorate({ ...row, slot_status: null, block_reason: null, user_email: user.email, user_role: user.role }));
 
   const counts = { all: bookings.length, pending: 0, confirmed: 0, completed: 0, rejected: 0, cancelled: 0 };
   for (const row of bookings) counts[row.status] = (counts[row.status] || 0) + 1;
@@ -338,17 +351,17 @@ function customerForStaff(id) {
  * is the customer read — it filters on `is_active` and never returns it — so
  * the services page needs its own.
  */
-function serviceBoard() {
-  const cats = db.all(
-    'SELECT id, slug, name, summary, sort_order, is_active FROM service_categories ORDER BY sort_order, name',
-  );
-  const services = db.all(
-    `SELECT id, category_id, slug, name, description, duration_minutes, price_text,
-            is_bookable, is_active, sort_order,
-            (SELECT COUNT(*) FROM bookings b WHERE b.service_id = services.id) AS booking_count
-     FROM services
-     ORDER BY sort_order, name`,
-  );
+async function serviceBoard() {
+  const [cats, services] = await Promise.all([
+    db.all('SELECT id, slug, name, summary, sort_order, is_active FROM service_categories ORDER BY sort_order, name'),
+    db.all(
+      `SELECT id, category_id, slug, name, description, duration_minutes, price_text,
+              is_bookable, is_active, sort_order,
+              (SELECT COUNT(*) FROM bookings b WHERE b.service_id = services.id) AS booking_count
+       FROM services
+       ORDER BY sort_order, name`,
+    ),
+  ]);
   return cats.map((cat) => ({
     ...cat,
     services: services.filter((row) => row.category_id === cat.id),
@@ -356,8 +369,8 @@ function serviceBoard() {
 }
 
 /** Every slot on a date with who holds it, for the day sheet. */
-function dayRows(date) {
-  return db.all(
+async function dayRows(date) {
+  const rows = await db.all(
     `SELECT s.id, s.start_time, s.status AS slot_status, s.block_reason,
             b.id AS booking_id, b.status AS booking_status, b.contact_name, b.contact_phone,
             b.preferred_title, b.note, b.staff_note, b.created_at, b.user_id,
@@ -370,7 +383,8 @@ function dayRows(date) {
      WHERE s.slot_date = ?
      ORDER BY s.start_time`,
     date,
-  ).map((row) => ({
+  );
+  return rows.map((row) => ({
     ...row,
     timeLabel: dates.formatTime12(row.start_time),
     endLabel: row.duration_minutes
